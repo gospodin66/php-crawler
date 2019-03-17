@@ -48,7 +48,7 @@ $d5 = "\n\33[93m********************************** 	<script>	*******************
 
 
 $string = "[".$d1.header_links($doc).$d2.metas($doc).$d3.hrefs($doc).$d4.imgs($doc).$d5.scripts($doc)."]";
-$string = str_replace("|", "\n", $string);
+$string = str_replace("||", "\n", $string);
 $string = substr_replace($string, '', -3, 2);
 
 $json = str_replace("> ", "", $string);
@@ -62,16 +62,16 @@ $json = str_replace($d5, "", $json);
 file_put_contents($title.".json", $json);
 
 while(1){
-	print "\33[93mOptions: (-e exit, -p print, -f follow): \33[0m";
+	print "\33[93mOptions: (e exit, p print, f follow): \33[0m";
 	switch (readline()) {
-	 	case '-p':
+	 	case 'p':
 		print $string;
 		break 2;
 	 	
-		case '-e':
+		case 'e':
 		break 2;
 
-		case '-f':
+		case 'f':
 		follow_links($doc,$d1,$d2,$d3,$d4,$d5);
 		break;
 
@@ -83,7 +83,7 @@ while(1){
 
 print "\x07";	// beep 
 print "\033[32m\nFinished.\n \033[0m";
-print `ls -l`; // backtick operator `` <=> shell_exec()
+//print `ls -l`; // backtick operator `` <=> shell_exec()
 exit();
 
 /**************************************************************/
@@ -147,7 +147,7 @@ function follow_links($doc,$d1,$d2,$d3,$d4,$d5){
 				@$title = $title->item(0)->nodeValue;
 
 				$string .= $d1.header_links($doc).$d2.metas($doc).$d3.hrefs($doc).$d4.imgs($doc).$d5.scripts($doc);
-				$string = str_replace("|", "\n", $string);
+				$string = str_replace("||", "\n", $string);
 
 				print $string."\n";
 				print "\033[32m> Finished.\n\n";
@@ -159,12 +159,12 @@ function follow_links($doc,$d1,$d2,$d3,$d4,$d5){
 		print "\33[0m";
 
 		while(1){
-		print "\33[93mOptions: (-r return, -s save [".strlen($string)." b]): \33[0m";
+		print "\33[93mOptions: (r return, s save [".strlen($string)." bytes]): \33[0m";
 		switch (readline()) {
-			case '-r':
+			case 'r':
 			break 2;
 
-			case '-s':
+			case 's':
 			$string = substr_replace($string, ']', -2, 2);
 			$json = str_replace("> ", "", $string);
 			$json = str_replace($d1, "", $json);
@@ -195,7 +195,7 @@ function header_links($doc){
 		$fmtd .= '> {"Element": "<'.$link->nodeName.'>"},';
 		$fmtd .= "\n";
 		foreach ($link->attributes as $attr) {	// loop through attributes
-			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},|';
+			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes(trim($attr->nodeValue),'"').'"},||';
 		}				
 	}
 	return $fmtd;
@@ -214,7 +214,7 @@ function hrefs($doc){
 			$fmtd .= ($attr->nodeValue == "#"   || 
 						 	$attr->nodeName != "href" ||
 						 	empty($attr->nodeValue))
-				      		? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},|';
+				      		? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},||';
 		}							
 	}
 	return $fmtd;
@@ -230,7 +230,7 @@ function metas($doc){
 		$fmtd .= "\n";
 		foreach ($meta->attributes as $attr) {	
 
-			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},|';
+			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},||';
 		}							
 	}
 	return $fmtd;
@@ -245,7 +245,7 @@ function imgs($doc){
 		$fmtd .= '> {" Element": "<'.$img->nodeName.'>"},';
 		$fmtd .= "\n";
 		foreach ($img->attributes as $attr) {	
-			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},|';
+			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addcslashes($attr->nodeValue,'"').'"},||';
 		}							
 	}
 	return $fmtd;
@@ -260,7 +260,7 @@ function scripts($doc){
 		$fmtd .= '> {"Element": "<'.$script->nodeName.'>"},';
 		$fmtd .= "\n";
 		foreach ($script->attributes as $attr) {	
-			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addslashes($attr->nodeValue).'"},|';
+			$fmtd .= empty($attr->nodeValue) ? "" : '> {"Node": "'.$attr->nodeName.'", "Value": "'.addslashes($attr->nodeValue).'"},||';
 		}							
 	}
 	return $fmtd;
