@@ -2,7 +2,7 @@
 
 if($argc < 2) die("Assign argument/s. -> php scrap.php <example.com>\n");
 
-$url = trim($argv[1]);
+$url = trim($argv[1]);	// security risk!! needs fix!!!!
 $ch = curl_init();
 
 /*curl_setopt($ch, CURLOPT_HTTPHEADER, array(
