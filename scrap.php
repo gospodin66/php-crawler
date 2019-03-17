@@ -1,5 +1,5 @@
 <?php
-setlocale(LC_CTYPE, "en_US.UTF-8");
+//setlocale(LC_CTYPE, "en_US.UTF-8");
 
 if($argc < 2) die("Assign argument/s. -> php scrap.php <example.com>\n");
 else if ($argc > 2) die("Only 1 argument needs to be asigned.\n");
@@ -81,7 +81,7 @@ while(1){
 	 } 
 }	
 
-print "\x07";	// beep 
+//print "\x07";	// beep 
 print "\033[32m\nFinished.\n \033[0m";
 //print `ls -l`; // backtick operator `` <=> shell_exec()
 exit();
@@ -174,7 +174,6 @@ function follow_links($doc,$d1,$d2,$d3,$d4,$d5){
 			$json = str_replace($d5, "", $json);
 			file_put_contents("Output.json", $json);
 			print "\33[32mSaved.\33[0m\n";
-			print "\x07";	// beep 
 			break 2;
 
 		 	default:
