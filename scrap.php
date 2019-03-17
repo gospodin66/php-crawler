@@ -1,8 +1,10 @@
 <?php
+setlocale(LC_CTYPE, "en_US.UTF-8");
 
 if($argc < 2) die("Assign argument/s. -> php scrap.php <example.com>\n");
+else if ($argc > 2) die("Only 1 argument needs to be asigned.\n");
 
-$url = trim($argv[1]);	// security risk!! needs fix!!!!
+$url = trim($argv[1]);
 $ch = curl_init();
 
 /*curl_setopt($ch, CURLOPT_HTTPHEADER, array(
