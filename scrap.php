@@ -62,7 +62,7 @@ $json = str_replace($d5, "", $json);
 file_put_contents($title.".json", $json);
 
 while(1){
-	print "\33[93mOptions: (e exit, p print, f follow): \33[0m";
+	print "\33[93mOptions: (e -exit, p -output main webpage results, f -follow): \33[0m";
 	switch (readline()) {
 	 	case 'p':
 		print $string;
