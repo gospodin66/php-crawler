@@ -6,3 +6,4 @@ simple cli web scraper script
   - advanced json format filter??
   - strlen()/mb_strlen() == bytes?? --- encoding
   - more options
+  - ip-s
