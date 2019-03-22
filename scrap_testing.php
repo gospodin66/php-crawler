@@ -15,7 +15,7 @@ $ch = curl_init();
 
 
 /*
-$url = 'https://musisax.fun/index.php?page=login';
+$url = 'example.com';
 $postinfo = 'login=100000000';
 
 curl_setopt($ch, CURLOPT_NOBODY, false);
@@ -23,7 +23,7 @@ curl_setopt($ch, CURLOPT_URL, $url);
 curl_setopt($ch, CURLOPT_POST, 1);
 curl_setopt($ch, CURLOPT_POSTFIELDS, $postinfo);
 curl_setopt($ch, CURLOPT_VERBOSE, 1);
-curl_setopt($ch, CURLOPT_COOKIE, "S: 2p143a3ekar83denlb7fqfpnp7; __cfduid: d0db25f3ef1d14d4841681455d1d483711553077982");
+curl_setopt($ch, CURLOPT_COOKIE, "S: ///////////// REPLACE; __cfduid: ///////////// REPLACE");
 
 
 $result = curl_exec($ch);
@@ -50,8 +50,8 @@ $opts = array(
     CURLOPT_SSL_VERIFYPEER  => 1,
     CURLOPT_FOLLOWLOCATION	=> 1,
     CURLOPT_AUTOREFERER		=> 1,
-    CURLOPT_COOKIE   		=> "S: 2p143a3ekar83denlb7fqfpnp7",
-    CURLOPT_COOKIE   		=> "__cfduid: d0db25f3ef1d14d4841681455d1d483711553077982",
+    CURLOPT_COOKIE   		=> "S: SESSID",		///////////// REPLACE
+    CURLOPT_COOKIE   		=> "__cfduid: SESSID",	///////////// REPLACE
     CURLOPT_HTTPHEADER		=> array(
     'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:65.0) Gecko/20100101 Firefox/65.0',
     'Accept: */*',
