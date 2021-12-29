@@ -375,16 +375,16 @@ function _get_elements($doc, string $tag, string $url) : array {
                     $attr->nodeValue !== "#"   && 
                     $attr->nodeValue !== 'javascript:void(0)')
                 {
-					$_element_elements ["{$node_element}-{$attr->nodeName}-".($cnt)] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
             }						
             if($a->hasChildNodes()){
                 foreach ($a->childNodes as $cn) {
-                    $_element_elements ["{$node_element}-{$cn->nodeName}-{$cnt}"] = trim(str_replace("\n", " ", $cn->nodeValue));
+                    $_element_elements [$cn->nodeName] = trim(str_replace("\n", " ", $cn->nodeValue));
                 }
             }
             if(! empty($_element_elements)){
-                $elements[$cnt] = $_element_elements;
+                $elements["{$node_element}-{$cnt}"] = $_element_elements;
             }
             $cnt++;
 		}
@@ -393,21 +393,21 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($form->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$node_element}-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
 			if($form->hasChildNodes()){
 				foreach($form->childNodes as $item) {
-					$_element_elements ["{$node_element}-{$item->nodeName}-{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
+					$_element_elements ["{$item->nodeName}"] = trim(str_replace("\n", " ", $item->nodeValue));
 					if($item->attributes !== null) {
 						foreach($item->attributes as $attr){
-							$_element_elements ["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+							$_element_elements ["attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 						}
 					}
 				}  
 			}
             if(! empty($_element_elements)){
-                $elements[$key] = $_element_elements;
+                $elements["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	} else if($tag === 'li'){
@@ -415,21 +415,21 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($li->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
 			if($li->hasChildNodes()){
 				foreach($li->childNodes as $item) {
-					$_element_elements ["{$node_element}-{$item->nodeName}-{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
+					$_element_elements ["{$item->nodeName}"] = trim(str_replace("\n", " ", $item->nodeValue));
 					if($item->attributes !== null) {
 						foreach($item->attributes as $attr){
-							$_element_elements ["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+							$_element_elements ["attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 						}
 					}
 				}  
 			}
             if(! empty($_element_elements)){
-                $elements[$key] = $_element_elements;
+                $elements["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	} else if($tag === 'table'){
@@ -437,23 +437,23 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($table->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["table-attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
             $trows = $table->getElementsByTagName('tr');
 			if(count($trows) > 0){
 				foreach($trows as $tr) {
-					$_element_elements ["{$node_element}-tr-{$tr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $tr->nodeValue));
+					$_element_elements ["tr-{$tr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $tr->nodeValue));
 					
                     $tds = $tr->getElementsByTagName('td');
 
-                    foreach($tds as $td){
-                        $_element_elements ["{$node_element}-td-{$td->nodeName}-".$key++] = trim(str_replace("\n", " ", $td->nodeValue));
+                    foreach($tds as $k => $td){
+                        $_element_elements ["td-{$td->nodeName}-".$k] = trim(str_replace("\n", " ", $td->nodeValue));
                     }
 				}  
 			}
             if(! empty($_element_elements)){
-                $elements[$key] = $_element_elements;
+                $elements["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
     } else { // default element => no child nodes 
@@ -461,11 +461,11 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($ele->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$node_element}-{$attr->nodeName}-{$key}"] = str_replace("\n", " ", $attr->nodeValue);
+					$_element_elements["{$attr->nodeName}"] = str_replace("\n", " ", $attr->nodeValue);
 				}
 			}
             if(! empty($_element_elements)){
-                $elements[$key] = $_element_elements;
+                $elements["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	}
