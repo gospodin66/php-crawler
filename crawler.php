@@ -442,13 +442,13 @@ function _get_elements($doc, string $tag, string $url) : array {
 			}
             $trows = $table->getElementsByTagName('tr');
 			if(count($trows) > 0){
-				foreach($trows as $tr) {
-					$_element_elements ["tr-{$tr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $tr->nodeValue));
+				foreach($trows as $trk => $tr) {
+					// $_element_elements ["{$tr->nodeName}-{$trk}"] = trim(str_replace("\n", " ", $tr->nodeValue));
 					
                     $tds = $tr->getElementsByTagName('td');
 
-                    foreach($tds as $k => $td){
-                        $_element_elements ["td-{$td->nodeName}-".$k] = trim(str_replace("\n", " ", $td->nodeValue));
+                    foreach($tds as $tdk => $td){
+                        $_element_elements ["{$tr->nodeName}-{$trk}-{$td->nodeName}-".$tdk] = trim(str_replace("\n", " ", $td->nodeValue));
                     }
 				}  
 			}
