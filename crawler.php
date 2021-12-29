@@ -18,8 +18,8 @@ if(preg_match('/^((http|https)\:\/\/)/', $domain)){
 // prox_opt is optional
 if(count($opts) === 3){
     $prox_opt = array_key_exists("torprox", $opts)
-    ? intval(trim($opts['torprox']))
-    : intval(trim($opts['x']));
+			  ? intval(trim($opts['torprox']))
+			  : intval(trim($opts['x']));
 } else {
     $prox_opt = 0;
 }
@@ -84,13 +84,13 @@ $title = $doc->getElementsByTagName("title");
 @$title = $title->item(0)->nodeValue;
 
 
-$hrefs   = _get_elements($doc,TAGS['a'],"{$scheme}://{$domain}");
-$lists 	 = _get_elements($doc,TAGS['li'],"{$scheme}://{$domain}");
-$imgs 	 = _get_elements($doc,TAGS['img'],"{$scheme}://{$domain}");
-$metas   = _get_elements($doc,TAGS['meta'],"{$scheme}://{$domain}");
-$links	 = _get_elements($doc,TAGS['link'],"{$scheme}://{$domain}");
-$forms 	 = _get_elements($doc,TAGS['form'],"{$scheme}://{$domain}");
-$tables  = _get_elements($doc,TAGS['table'],"{$scheme}://{$domain}");
+$hrefs = _get_elements($doc,TAGS['a'],"{$scheme}://{$domain}");
+$lists = _get_elements($doc,TAGS['li'],"{$scheme}://{$domain}");
+$imgs = _get_elements($doc,TAGS['img'],"{$scheme}://{$domain}");
+$metas = _get_elements($doc,TAGS['meta'],"{$scheme}://{$domain}");
+$links = _get_elements($doc,TAGS['link'],"{$scheme}://{$domain}");
+$forms = _get_elements($doc,TAGS['form'],"{$scheme}://{$domain}");
+$tables = _get_elements($doc,TAGS['table'],"{$scheme}://{$domain}");
 $scripts = _get_elements($doc,TAGS['script'],"{$scheme}://{$domain}");
 
 $i_page = [$links,$metas,$hrefs,$imgs,$scripts,$forms,$lists,$tables];
@@ -99,13 +99,16 @@ $json = json_encode($i_page);
 print "Successfuly scrapped the main webpage!\r\n";
 
 while(1){
-	print "\33[93mOptions:\ne -exit\np -print main webpage results\nf -follow webpage links\33[0m\n";
+	print "\33[93mOptions:\ne -exit\np -print main webpage results\ns -save main webpage results\nf -follow webpage links\33[0m\n";
 	switch (readline("> ")) {
 	 	case 'p':
 			print_r($i_page);
 			echo "\n";
 			break;
-
+		case 's':
+			file_put_contents(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".json", json_encode($i_page));
+			echo "\nSuccessfuly saved file!\n";
+			break;
 		case 'e':
 			break 2;
 
@@ -149,7 +152,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 				file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
 				break;
 			}
-            // do not exec .js | .php!
+            // do not exec .js | javascript:void(0) | .php!
 			else if(preg_match("/(\.js$)|(\.php$)|(javascript:void\(0\))/", $url))
 			{
 				print "\33[95m[".$time."] > Script format >>> skipping..\n\33[0m";
@@ -242,13 +245,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
 		}
 
-		$hrefs   [TAGS['a'].$key] = _get_elements($doc,TAGS['a'],$url);		
-		$lists 	 [TAGS['li'].$key] = _get_elements($doc,TAGS['li'],$url);
-		$imgs 	 [TAGS['img'].$key] = _get_elements($doc,TAGS['img'],$url);
-		$links   [TAGS['link'].$key] = _get_elements($doc,TAGS['link'],$url);
-		$metas   [TAGS['meta'].$key] = _get_elements($doc,TAGS['meta'],$url);
-		$forms 	 [TAGS['form'].$key] = _get_elements($doc,TAGS['form'],$url);
-		$tables  [TAGS['table'].$key] = _get_elements($doc,TAGS['table'],$url);
+		$hrefs [TAGS['a'].$key] = _get_elements($doc,TAGS['a'],$url);		
+		$lists [TAGS['li'].$key] = _get_elements($doc,TAGS['li'],$url);
+		$imgs [TAGS['img'].$key] = _get_elements($doc,TAGS['img'],$url);
+		$links [TAGS['link'].$key] = _get_elements($doc,TAGS['link'],$url);
+		$metas [TAGS['meta'].$key] = _get_elements($doc,TAGS['meta'],$url);
+		$forms [TAGS['form'].$key] = _get_elements($doc,TAGS['form'],$url);
+		$tables [TAGS['table'].$key] = _get_elements($doc,TAGS['table'],$url);
 		$scripts [TAGS['script'].$key] = _get_elements($doc,TAGS['script'],$url);
 
         echo "Scrapped {$key}. request: [{$url}]\r\n";
@@ -357,8 +360,9 @@ function _get_elements($doc, string $tag, string $url) : array {
 	if(empty($eles[0])){
 		return [];
 	}
+	$node_element = $eles[0]->nodeName;
 	$elements = [
-		'node_element' => "{$eles[0]->nodeName}",
+		'node_element' => $node_element,
         'node_url' => $url,
 	];
 	if($tag === 'a'){
@@ -371,12 +375,12 @@ function _get_elements($doc, string $tag, string $url) : array {
                     $attr->nodeValue !== "#"   && 
                     $attr->nodeValue !== 'javascript:void(0)')
                 {
-					$_element_elements ["{$attr->nodeName}_".($cnt)] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements ["{$node_element}-{$attr->nodeName}-".($cnt)] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
             }						
             if($a->hasChildNodes()){
                 foreach ($a->childNodes as $cn) {
-                    $_element_elements ["{$cn->nodeName}_{$cnt}"] = trim(str_replace("\n", " ", $cn->nodeValue));
+                    $_element_elements ["{$node_element}-{$cn->nodeName}-{$cnt}"] = trim(str_replace("\n", " ", $cn->nodeValue));
                 }
             }
             if(! empty($_element_elements)){
@@ -389,15 +393,15 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($form->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["{$node_element}-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
 			if($form->hasChildNodes()){
 				foreach($form->childNodes as $item) {
-					$_element_elements ["child-node-{$item->nodeName}_{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
+					$_element_elements ["{$node_element}-{$item->nodeName}-{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
 					if($item->attributes !== null) {
 						foreach($item->attributes as $attr){
-							$_element_elements ["child-attr-{$attr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+							$_element_elements ["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 						}
 					}
 				}  
@@ -411,15 +415,15 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($li->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
 			if($li->hasChildNodes()){
 				foreach($li->childNodes as $item) {
-					$_element_elements ["child-node-{$item->nodeName}_{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
+					$_element_elements ["{$node_element}-{$item->nodeName}-{$key}"] = trim(str_replace("\n", " ", $item->nodeValue));
 					if($item->attributes !== null) {
 						foreach($item->attributes as $attr){
-							$_element_elements ["child-attr-{$attr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+							$_element_elements ["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 						}
 					}
 				}  
@@ -433,18 +437,18 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($table->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["table-attr-{$attr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
+					$_element_elements["{$node_element}-attr-{$attr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $attr->nodeValue));
 				}
 			}
             $trows = $table->getElementsByTagName('tr');
 			if(count($trows) > 0){
 				foreach($trows as $tr) {
-					$_element_elements ["tr-node-{$tr->nodeName}_{$key}"] = trim(str_replace("\n", " ", $tr->nodeValue));
+					$_element_elements ["{$node_element}-tr-{$tr->nodeName}-{$key}"] = trim(str_replace("\n", " ", $tr->nodeValue));
 					
                     $tds = $tr->getElementsByTagName('td');
 
                     foreach($tds as $td){
-                        $_element_elements ["td-node-{$td->nodeName}_".$key++] = trim(str_replace("\n", " ", $td->nodeValue));
+                        $_element_elements ["{$node_element}-td-{$td->nodeName}-".$key++] = trim(str_replace("\n", " ", $td->nodeValue));
                     }
 				}  
 			}
@@ -457,7 +461,7 @@ function _get_elements($doc, string $tag, string $url) : array {
             $_element_elements = [];
 			foreach ($ele->attributes as $attr){
 				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}_{$key}"] = str_replace("\n", " ", $attr->nodeValue);
+					$_element_elements["{$node_element}-{$attr->nodeName}-{$key}"] = str_replace("\n", " ", $attr->nodeValue);
 				}
 			}
             if(! empty($_element_elements)){
