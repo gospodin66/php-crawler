@@ -99,16 +99,55 @@ $json = json_encode($i_page);
 print "Successfuly scrapped the main webpage!\r\n";
 
 while(1){
-	print "\33[93mOptions:\ne -exit\np -print main webpage results\ns -save main webpage results\nf -follow webpage links\33[0m\n";
+	print "\33[93mOptions:\ne -exit\nj -read json file\nl -fetch elements by type\np -print main webpage results\ns -save main webpage results\nf -follow webpage links\33[0m\n";
 	switch (readline("> ")) {
 	 	case 'p':
 			print_r($i_page);
 			echo "\n";
 			break;
+
+        case 'j':
+            $eles = read_json(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".json");
+            print "JSON file read successfuly!\n";
+            break;
+
+        case 'l':
+            switch (readline("enter element to filter: > ")) {
+                case 'img':
+                    $filter_el = 'img';
+                    break;
+                case 'form':
+                    $filter_el = 'form';
+                    break;
+                case 'link':
+                    $filter_el = 'link';
+                    break;
+                case 'meta':
+                    $filter_el = 'meta';
+                    break;
+				case 'li':
+					$filter_el = 'li';
+					break;
+				case 'table':
+					$filter_el = 'table';
+					break;
+                case 'script':
+                    $filter_el = 'script';
+                    break;
+                default:
+                    $filter_el = 'a';
+                    break;
+            }
+			$eles_by_type = [];
+            recursive_filter_elements($eles, $eles_by_type, $filter_el);
+			recursive_read_elements($eles_by_type);
+            break;
+
 		case 's':
 			file_put_contents(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".json", json_encode($i_page));
 			echo "\nSuccessfuly saved file!\n";
 			break;
+            
 		case 'e':
 			break 2;
 
@@ -134,18 +173,21 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
     $cnt = 0;
 	foreach ($href_links as $key => $a)
 	{	
-		foreach ($a->attributes as $link)
+		foreach ($a->attributes as $attrkey => $link)
 		{	
-			$log  = "";
-			$url  = trim($link->nodeValue);
+            if($attrkey !== 'href'){
+                continue;
+            }
+            
+            $log = "";
+            $url = trim($link->nodeValue);
 			$time = date("Y-m-d H:i:s");
 
 			if(empty($url) || $url[0] === '#' || $url[0] === '_'){
 				break;	
 			}
 			// do not download content!
-			else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)/", $url))
-			{
+			else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)/", $url)) {
 				print "\33[94m[".$time."] > Content URL >>> ".$url." >>> skipping..\33[0m\n";
 				$log .= "[".$time."] > Content URL [".strlen($url)." bytes] >>> ".$url." >>> skipping..\r\n";
 				file_put_contents(DATA_DIR."content_".str_replace("/", "-", $domain).".txt", $url."\n", FILE_APPEND);
@@ -153,8 +195,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 				break;
 			}
             // do not exec .js | javascript:void(0) | .php!
-			else if(preg_match("/(\.js$)|(\.php$)|(javascript:void\(0\))/", $url))
-			{
+			else if(preg_match("/(\.js$)|(\.php$)|(javascript:void\(0\))/", $url)) {
 				print "\33[95m[".$time."] > Script format >>> skipping..\n\33[0m";
 				$log .= "[".$time."] > Script format >>> ".$url." >>> skipping..\r\n";
 				break;
@@ -243,6 +284,9 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			print "\033[32m> Finished.\n\033[96m> Crawled webpages: ".(count($crawled)-1)."\33[0m\n";
 			$log = "[".$time."] > Crawled webpages: ".(count($crawled)-1);
 			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
+
+            
+            echo "Scrapped ".(count($crawled) -1).". request: [{$url}]\r\n";
 		}
 
 		$hrefs [TAGS['a'].$key] = _get_elements($doc,TAGS['a'],$url);		
@@ -254,7 +298,6 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 		$tables [TAGS['table'].$key] = _get_elements($doc,TAGS['table'],$url);
 		$scripts [TAGS['script'].$key] = _get_elements($doc,TAGS['script'],$url);
 
-        echo "Scrapped {$key}. request: [{$url}]\r\n";
     }
 
 	$json = json_encode([$links,$metas,$imgs,$scripts,$hrefs,$forms,$lists,$tables]);
@@ -264,17 +307,56 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 
 	while(1)
 	{
-		print "\33[93mOptions: \np print all results\nr return\ns save [JSON size: ".(strlen($json) / 1000000)."Mb]\33[0m\n";
+		print "\33[93mOptions: \np -print all results\nj -decode json file\nl -fetch elements by type\nr -return\ns -save [JSON size: ".(strlen($json) / 1000000)."Mb]\33[0m\n";
 		switch (readline("> "))
 		{
 			case 'r':
 				break 2;
 
+            case 'j':
+                $eles = read_json(__DIR__."/".DATA_DIR.$domain.".json");
+                print "JSON file read successfuly!\n";
+                break;
+
+            case 'l':
+                switch (readline("enter element to filter: > ")) {
+                    case 'img':
+                        $filter_el = 'img';
+                        break;
+                    case 'form':
+                        $filter_el = 'form';
+                        break;
+                    case 'link':
+                        $filter_el = 'link';
+                        break;
+                    case 'meta':
+                        $filter_el = 'meta';
+                        break;
+                    case 'table':
+                        $filter_el = 'table';
+                        break;
+                    case 'script':
+                        $filter_el = 'script';
+                        break;
+					case 'li':
+						$filter_el = 'li';
+						break;
+                    default:
+                        $filter_el = 'a';
+                        break;
+                }
+                $eles_by_type = fetch_html_elements_by_type($eles, $filter_el);
+                if(file_put_contents(__DIR__."/".DATA_DIR.$domain.".filtered.json", json_encode($eles_by_type)) !== false){
+                    echo "Fitered elements saved to file successfuly!\n";
+                }
+				recursive_read_elements($eles_by_type);
+                break;
+
 			case 's':
 				file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".json", $json);
 				print "\33[32mSaved.\33[0m\n";
 				print "\33[95mResult file >>> ".__DIR__."/".DATA_DIR.$domain.".json\33[0m\n";
-				break 2;
+				break;
 
 			case 'p':
 				print_r(json_decode($json));
@@ -308,10 +390,10 @@ function call__curl(string $scheme, string $url, bool $prox_opt) : array {
 	}
 	curl_close($ch);
 	return [
-		'page' 	  => $page,
-		'info'    => $curlinfo,
-		'host'    => $host,
-		'speed'   => $speed,
+		'page' => $page,
+		'info' => $curlinfo,
+		'host' => $host,
+		'speed' => $speed,
 		'cookies' => $cookies,
 	];
 }
@@ -355,6 +437,54 @@ function check_base_domain(string $base_domain, string $link_domain, string $sch
 	return ($base_domain === $link_domain['host']); 
 }
 
+function recursive_loop_child_elements($element, &$el_elements) {
+	if(is_iterable($element)){
+		$cnt = 0;
+		foreach ($element as $key => $el) {
+			if( ! empty($el->attributes)){
+				foreach ($el->attributes as $attr){
+					if( ! empty($attr->nodeValue)){
+						if(in_array($el->nodeName, TAGS)){
+							$el_elements[
+								"{$el->nodeName}"
+							] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+						} else {
+							$el_elements[
+								"{$el->nodeName}-{$cnt}"
+							] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+						}
+					}
+				}
+				$cnt++;
+			}
+			if($el->hasChildNodes()){
+				recursive_loop_child_elements($el->childNodes, $el_elements);
+			}
+		}
+	} else {
+		if( ! empty($element->attributes)){
+			$cnt = 0;
+			foreach ($element->attributes as $attr){
+				if( ! empty($attr->nodeValue)){
+					if(in_array($element->nodeName, TAGS)){
+						$el_elements[
+							"{$element->nodeName}"
+						] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+					} else {
+						$el_elements[
+							"{$element->nodeName}-{$cnt}"
+						] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+						$cnt++;
+					}
+				}
+			}
+		}
+		if($element->hasChildNodes()){
+			recursive_loop_child_elements($element->childNodes, $el_elements);
+		}
+	}
+}
+
 function _get_elements($doc, string $tag, string $url) : array {
 	$eles = $doc->getElementsByTagName($tag);
 	if(empty($eles[0])){
@@ -362,110 +492,48 @@ function _get_elements($doc, string $tag, string $url) : array {
 	}
 	$node_element = $eles[0]->nodeName;
 	$elements = [
-		'node_element' => $node_element,
+        'node' => $node_element,
         'node_url' => $url,
+		'node_elements' => [],
 	];
 	if($tag === 'a'){
-        $cnt = 0;
-		foreach ($eles as $a) {
+		foreach ($eles as $key => $a) {
             $_element_elements = [];
-			foreach ($a->attributes as $attr) {
-				if(!empty($attr->nodeValue) &&
-                    $attr->nodeName === "href" && 
-                    $attr->nodeValue !== "#"   && 
-                    $attr->nodeValue !== 'javascript:void(0)')
-                {
-					$_element_elements [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
-				}
-            }						
-            if($a->hasChildNodes()){
-                foreach ($a->childNodes as $cn) {
-                    $_element_elements [$cn->nodeName] = trim(str_replace("\n", " ", $cn->nodeValue));
-                }
-            }
+			recursive_loop_child_elements($a, $_element_elements);
             if(! empty($_element_elements)){
-                $elements["{$node_element}-{$cnt}"] = $_element_elements;
+                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
             }
-            $cnt++;
 		}
 	} else if($tag === 'form'){
         foreach ($eles as $key => $form){
             $_element_elements = [];
-			foreach ($form->attributes as $attr){
-				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
-				}
-			}
-			if($form->hasChildNodes()){
-				foreach($form->childNodes as $item) {
-					$_element_elements ["{$item->nodeName}"] = trim(str_replace("\n", " ", $item->nodeValue));
-					if($item->attributes !== null) {
-						foreach($item->attributes as $attr){
-							$_element_elements ["attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
-						}
-					}
-				}  
-			}
+			recursive_loop_child_elements($form, $_element_elements);
             if(! empty($_element_elements)){
-                $elements["{$node_element}-{$key}"] = $_element_elements;
+                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	} else if($tag === 'li'){
         foreach ($eles as $key => $li){
             $_element_elements = [];
-			foreach ($li->attributes as $attr){
-				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
-				}
-			}
-			if($li->hasChildNodes()){
-				foreach($li->childNodes as $item) {
-					$_element_elements ["{$item->nodeName}"] = trim(str_replace("\n", " ", $item->nodeValue));
-					if($item->attributes !== null) {
-						foreach($item->attributes as $attr){
-							$_element_elements ["attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
-						}
-					}
-				}  
-			}
+			recursive_loop_child_elements($li, $_element_elements);
             if(! empty($_element_elements)){
-                $elements["{$node_element}-{$key}"] = $_element_elements;
+                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	} else if($tag === 'table'){
         foreach ($eles as $key => $table){
             $_element_elements = [];
-			foreach ($table->attributes as $attr){
-				if(!empty($attr->nodeValue)){
-					$_element_elements["table-attr-{$attr->nodeName}"] = trim(str_replace("\n", " ", $attr->nodeValue));
-				}
-			}
-            $trows = $table->getElementsByTagName('tr');
-			if(count($trows) > 0){
-				foreach($trows as $trk => $tr) {
-					// $_element_elements ["{$tr->nodeName}-{$trk}"] = trim(str_replace("\n", " ", $tr->nodeValue));
-					
-                    $tds = $tr->getElementsByTagName('td');
-
-                    foreach($tds as $tdk => $td){
-                        $_element_elements ["{$tr->nodeName}-{$trk}-{$td->nodeName}-".$tdk] = trim(str_replace("\n", " ", $td->nodeValue));
-                    }
-				}  
-			}
+			recursive_loop_child_elements($table, $_element_elements);
             if(! empty($_element_elements)){
-                $elements["{$node_element}-{$key}"] = $_element_elements;
+                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
     } else { // default element => no child nodes 
 		foreach ($eles as $key => $ele){
             $_element_elements = [];
-			foreach ($ele->attributes as $attr){
-				if(!empty($attr->nodeValue)){
-					$_element_elements["{$attr->nodeName}"] = str_replace("\n", " ", $attr->nodeValue);
-				}
-			}
+			recursive_loop_child_elements($ele, $_element_elements);
             if(! empty($_element_elements)){
-                $elements["{$node_element}-{$key}"] = $_element_elements;
+                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
             }
 		}
 	}
@@ -509,16 +577,53 @@ function publicIp(bool $prox_opt) {
 	return $result;
 }
 
-
-function extract_prices(){
-
-
-    
-
-
-
+function read_json(string $file) : array {
+    if( ! file_exists($file)){
+        return [];
+    }
+    $fp = fopen($file, 'r');
+    $contents = '';
+    while ( ! feof($fp)){
+        $contents .= fread($fp, 4096);
+    }
+    $json_decoded = json_decode($contents);
+    return ! empty($json_decoded) ? $json_decoded : [];
 }
 
+function fetch_html_elements_by_type(array $elements, string $filter_element) : array {
+    $data = [];
+    if(empty($elements)){
+        return $data;
+    }
+    recursive_filter_elements($elements, $data, $filter_element);
+    return ! empty($data) ? $data : [];
+}
 
+function recursive_filter_elements($element, &$data, string $filter_element){
+	foreach ($element as $k => $el_vals) {
+		if(is_iterable($el_vals) && ! empty($el_vals)){
+			recursive_filter_elements($el_vals, $data, $filter_element);
+		}
+		else {
+			$node_el = $el_vals->node_elements ?? null;
+			$node = $el_vals->node ?? null;
+			if($node_el !== null && $node !== null && $node === $filter_element){
+				foreach ($node_el as $node_el_key => $node_el_val) {
+					$data["{$node_el_key}"] = $node_el_val;
+				}
+			}
+		}
+	}
+}
+
+function recursive_read_elements($elements) {
+	foreach ($elements as $key => $el) {
+		if(is_object($el) || is_array($el)) {
+			recursive_read_elements($el);
+		} else {
+			echo "{$key}: {$el}\n\n";
+		}
+	}
+}
 
 ?>
