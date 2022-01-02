@@ -18,10 +18,10 @@ if(preg_match('/^((http|https)\:\/\/)/', $domain)){
 // prox_opt is optional
 if(count($opts) === 3){
     $prox_opt = array_key_exists("torprox", $opts)
-			  ? (bool)trim($opts['torprox'])
-			  : (bool)trim($opts['x']);
+			  ? intval(trim($opts['torprox']))
+			  : intval(trim($opts['x']));
 } else {
-    $prox_opt = false;
+    $prox_opt = 0;
 }
 
 
@@ -36,7 +36,7 @@ define("TAGS",[
     'script' => 'script',
 ]);
 
-// if($prox_opt !== 1){ $prox_opt = false; }
+if($prox_opt !== 1){ $prox_opt = 0; }
 
 $public_ip = get_public_ip($prox_opt);
 $parsed_url = parse_url($scheme."://".$domain);
@@ -53,29 +53,35 @@ $curl_start = microtime(true);
 $results = call__curl($scheme, $domain, $prox_opt);
 $curl_time = microtime(true) - $curl_start;
 if(@!$results['status'] && !empty($results['error'])){
-	die("> Err: ".$results['error'].",\r\n> Exit\r\n");
+	die("> Error: ".$results['error'].",\r\n> Exit\r\n");
 	
 }
 if($results['info']['http_code'] === 403){
 	while(readline('HTTP status 403, repeat? (y/n): ') === 'y'){
 		$results = call__curl($scheme, $domain, $prox_opt);
 		if(@!$results['status'] && !empty($results['error'])){
-			die("> Err: ".$results['error'].",\r\n> Exit..\r\n");
+			die("> Error: ".$results['error'].",\r\n> Exit\r\n");
 		}
 		if($results['info']['http_code'] !== 403){
 			break;
 		}
 	}
 }
+$res_size = calc_size($results['info']['size_download']);
+$exectime = get_exec_time($curl_time);
+
 $_time = date("Y-m-d H:i:s");
 $log .= "> Public IP: [".trim($public_ip)."]\r\n\r\n";
-$log .= "[$_time] > URL: ".$domain."\r\n";
-$log .= "[$_time] > Host: {$results['host']} | down/up speed[bytes]: {$results['speed']}\r\n";
-$log .= "> Page size: [".strlen($results['page'])."] b\r\n";
-$log .= "> Len: {$results['info']['size_download']} b\r\n";
+$log .= "> [$_time] > URL: ".$domain."\r\n";
+$log .= "> [$_time] > Host: {$results['host']} | down/up speed[bytes]: {$results['speed']}\r\n";
+$log .= "> Page size: [".strlen($results['page'])." bytes]\r\n";
+$log .= "> Len: [{$res_size}]\r\n";
+$log .= "> Time: [{$exectime}]\r\n";
 
-print "> Public IP: [\33[36m".trim($public_ip)."\33[0m]\r\n";
-print "> Page size: [".strlen($results['page'])." b] > Len: [{$results['info']['size_download']} b] > Time: [".round($curl_time * 1000)." ms]\r\n";
+print("> Public IP: [\33[96m".trim($public_ip)."\33[0m]\r\n");
+print("> Page size: [\33[96m".strlen($results['page'])." bytes\33[0m] ".
+	  "> Len: [\33[96m{$res_size}\33[0m] ".
+	  "> Time: [\33[96m{$exectime}\33[0m]\r\n");
 
 file_put_contents(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".txt", $log, FILE_APPEND);
 $log = "";
@@ -98,7 +104,7 @@ $scripts = _get_elements($doc,TAGS['script'],"{$scheme}://{$domain}");
 $i_page = [$links,$metas,$hrefs,$imgs,$scripts,$forms,$lists,$tables];
 $json = json_encode($i_page);
 
-print "> Successfuly scrapped the main webpage!\r\n";
+print "> Successfuly scrapped the main webpage\r\n";
 while(1){
 	print "Options:\ne -exit\nj -read json file\nl -fetch elements by type\np -print main webpage results\ns -save main webpage results\nf -follow webpage links\n";
 	switch (readline("> ")) {
@@ -109,11 +115,11 @@ while(1){
 
         case 'j':
             $eles = read_json(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".json");
-            print "JSON file read successfuly!\r\n";
+            print "> JSON file read successfuly\r\n";
             break;
 
         case 'l':
-            switch (readline("enter element to filter: > ")) {
+            switch (readline("> Enter element to filter: ")) {
                 case 'img':
                     $filter_el = 'img';
                     break;
@@ -162,12 +168,12 @@ while(1){
 	 } 
 }	
 // print "\x07"; // beep 
-print("\033[32m\r\n> Finished\r\n\033[0m");
+print("\r\n\033[32m> Finished\r\n\033[0m");
 exit(0);
 
 /******************************************************************************/
 
-function follow_links(array $opts, $doc, string $domain, string $scheme, bool $prox_opt){
+function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt){
 	$href_links = $doc->getElementsByTagName('a');
 	$url_regex = "/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\/\S*)?/";
 	$crawled = $links = $metas = $hrefs = $imgs = $scripts = $forms = $lists = $tables = [];
@@ -189,7 +195,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			}
 			// do not download content!
 			else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)/", $url, $matches)) {
-				printf("> \33[31mError\33[0m%3s| [%d] | [%s] | [\33[31mcontent URL > format: \33[0m%s]\r\n",
+				printf("> \33[31mError\33[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\33[31mcontent URL > format: \33[0m%s]\r\n",
 							' ', count($crawled), $url, $matches[0]
 					  );
 				$log .= "[{$time}] > content URL [".strlen($url)." b] > [{$url}] \r\n";
@@ -199,7 +208,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			}
             // do not exec .js | javascript:void(0) | .php!
 			else if(preg_match("/(\.js$)|(\.php$)|(javascript:void\(0\))/", $url, $matches)) {
-				printf("> \33[31mError\33[0m%3s| [%d] | [%s] | [\33[31mscript format: %s\33[0m]\r\n",
+				printf("> \33[31mError\33[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\33[31mscript format: %s\33[0m]\r\n",
 							' ', count($crawled), $url, $matches[0]
 					  );
 				$log .= "> [{$time}] > [script format: {$matches[0]}] > [{$url}]\r\n";
@@ -207,7 +219,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			}
             // skip mailto: | tel:
             else if(preg_match("/(mailto:|tel:)/", $url)) {
-				printf("> \33[31mError\33[0m%3s| [%d] | [%s] | [\033[31memail/tel format\033[0m]\r\n",
+				printf("> \33[31mError\33[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\033[31memail/tel format\033[0m]\r\n",
 							' ', count($crawled), $url
 					  );
 				$log .= "> [{$time}] > Error | [{$url}] | [email/tel format]\r\n";
@@ -215,7 +230,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
             }
             // broken paths => can add more
             else if(preg_match("/(_blank)/", $url)) {
-                printf(">\33[31mError\33[0m%3s| [%d] | [%s] | [\33[31mbroken path\33[0m]\r\n",
+                printf(">\33[31mError\33[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\33[31mbroken path\33[0m]\r\n",
 							' ', count($crawled), $url
 					  );
 				$log .= "> [{$time}] > [broken path] > [{$url}]\r\n";
@@ -250,7 +268,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 				else if (substr($url, 0, 11) == "javascript:")
 				{
 					$log .= "> [{$time}] > [script format > {$url}]\r\n";
-					printf("> \033[31mError\033[0m%3s| [%d] | [%s] | [\033[31mscript format\033[0m]\r\n",
+					printf("> \033[31mError\033[0m%3s".
+								"| [%d] ".
+								"| [%s] ".
+								"| [\033[31mscript format\033[0m]\r\n",
 								' ', count($crawled), $url
 						  );
 					break;
@@ -271,7 +292,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 
 			if(! check_base_domain($domain,$url,$scheme)){
 				$log .= " [{$time}] > invalid base domain [{$url}]\r\n";
-				printf("> \033[31mError\033[0m%3s| [%d] | [%s] | [\033[31minvalid base domain\033[0m]\r\n",
+				printf("> \033[31mError\033[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\033[31minvalid base domain\033[0m]\r\n",
 							' ', count($crawled), $url
 					  );
 				continue;
@@ -281,8 +305,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 			$curl_time = microtime(true) - $curl_start;
 			if(@!$results['status'] && !empty($results['error'])){
 				$log .= " [{$time}] > {$results['error']}\r\n";
-				printf("> \033[31mError\033[0m%3s| [%d] | [%s] | [\033[31m%s\033[0m] | [\033[31m%d ms\033[0m]\r\n",
-							' ', count($crawled), $url, $results['error'], round($curl_time * 1000)
+				$exectime = get_exec_time($curl_time);
+				printf("> \033[31mError\033[0m%3s".
+							"| [%d] ".
+							"| [%s] ".
+							"| [\033[31m%s\033[0m] ".
+							"| [\033[31m%s\033[0m]\r\n",
+							' ', count($crawled), $url, $results['error'], $exectime,
 					  );
 				continue;
 			}
@@ -290,15 +319,21 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 
 			$log .= "> [{$time}] > Host: {$results['host']} | down/up speed[bytes]: {$results['speed']}\r\n";
 			$log .= "> Page size: [".strlen($results['page'])."] b.\r\n";
-			$log .= "> Content length: {$results['info']['size_download']} b\r\n";
+			$log .= "> Len: {$results['info']['size_download']} b\r\n";
 			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
 			$log = "";
 				
 			$doc = new DOMDocument();
 			@$doc->loadHTML($results['page']);
 
-			printf("> \033[36mSuccess\33[0m | [%d] | [%s] | [\033[36m%d b\33[0m] | [\033[36m%d ms\033[0m]\r\n",
-						(count($crawled)-1), $url, $results['info']['size_download'], round($curl_time * 1000)
+			$res_size = calc_size($results['info']['size_download']);
+			$exectime = get_exec_time($curl_time);
+			printf("> \033[36mSuccess\33[0m ".
+						"| [%d] ".
+						"| [%s] ".
+						"| [\033[36m%s\33[0m] ".
+						"| [\033[36m%s\033[0m]\r\n",
+						(count($crawled)-1), $url, $res_size, $exectime,
 				  );
 			$log = "> [{$time}] > Scrapped webpages: ".(count($crawled)-1);
 			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
@@ -317,7 +352,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 
 	while(1)
 	{
-		print "Options: \np -print all results\nj -decode json file\nl -fetch elements by type\nr -return\ns -save [JSON size: ".(strlen($json) / 1000000)."Mb]\n";
+		print "Options: \np -print all results\nj -decode json file\nl -fetch elements by type\nr -return\ns -save [JSON size: ".(strlen($json) / 1000000)." Mb]\n";
 		switch (readline("> "))
 		{
 			case 'r':
@@ -325,7 +360,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
 
             case 'j':
                 $eles = read_json(__DIR__."/".DATA_DIR.$domain.".json");
-                print "JSON file read successfuly!\n";
+                print("JSON file read successfuly\r\n");
                 break;
 
             case 'l':
@@ -357,31 +392,50 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, bool $p
                 }
                 $eles_by_type = fetch_html_elements_by_type($eles, $filter_el);
                 if(file_put_contents(__DIR__."/".DATA_DIR.$domain.".filtered.json", json_encode($eles_by_type)) !== false){
-                    echo "Fitered elements saved to file successfuly!\n";
+                    print("Fitered elements saved to file successfuly\r\n");
                 }
 				recursive_read_elements($eles_by_type);
                 break;
 
 			case 's':
 				file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".json", $json);
-				print "\33[32mSaved.\33[0m\n";
-				print "\33[95mResult file > ".__DIR__."/".DATA_DIR.$domain.".json\33[0m\n";
+				print("\33[32mSaved\33[0m \33[95m > Result file: ".__DIR__."/".DATA_DIR.$domain.".json\33[0m\r\n");
+				print("");
 				break;
 
 			case 'p':
 				print_r(json_decode($json));
-				echo "\n";	
+				print("\r\n");	
 				break;
 
 		 	default:
-			 	print "\033[31m> Invalid argument.\33[0m\n";
+			 	print "\033[31m> Invalid argument\33[0m\r\n";
 			 	break;
 		} 
 	}
 	return;
 }
 
-function call__curl(string $scheme, string $url, bool $prox_opt) : array {
+function calc_size(int $size) : string {
+	return ($res_size = strlen($size) > 6)
+		 			  ? ($size / 1000000)." Mb"
+		 			  : ((strlen($size) > 3 && strlen($size) < 7)
+						 ? ($size / 1000)." kb"
+						 : ($size)." b"
+					    );
+}
+
+function get_exec_time(float $time) : string {
+	$micro = html_entity_decode('&#956;');
+	return ($res_size = strpos($time, '.') > 6)
+					  ? round(($time / 1000000), 3)." s"
+					  : ((strpos($time, '.') > 3 && strpos($time, '.') < 7)
+					     ? round(($time / 1000), 3)." ms"
+					     : sprintf("%.3f %ss" , $time, $micro)
+					    );
+}
+
+function call__curl(string $scheme, string $url, int $prox_opt) : array {
 	$ch = curl_init();
 	$opts = select_opts($scheme,$url,$prox_opt);
 	curl_setopt_array($ch, $opts);
@@ -408,9 +462,9 @@ function call__curl(string $scheme, string $url, bool $prox_opt) : array {
 	];
 }
 
-function select_opts(string $scheme, string $url, bool $prox_opt) : array {
-	return [
-		CURLOPT_URL 			=> preg_match('/^'.$scheme.'./', $url) ? $url : $scheme."://".$url,
+function select_opts(string $scheme, string $url, int $prox_opt) : array {
+	$opts = [
+		CURLOPT_URL 			=> preg_match('/^'.$scheme.'./', $url) ? $url : "{$scheme}://{$url}",
 	    CURLOPT_HEADER 			=> 1,
 	    CURLOPT_VERBOSE 		=> 0, // 0 normally
 	    CURLOPT_RETURNTRANSFER 	=> 1,
@@ -422,14 +476,19 @@ function select_opts(string $scheme, string $url, bool $prox_opt) : array {
 	    CURLOPT_MAXREDIRS 		=> 5,
 		CURLOPT_COOKIEJAR		=> 'session/SessionCookies.txt',
 		CURLOPT_COOKIEFILE		=> 'session/SessionCookies.txt',
-		CURLOPT_PROXY 			=> $prox_opt ? '127.0.0.1:9050' : false, 
-	    CURLOPT_PROXYTYPE		=> CURLPROXY_SOCKS5_HOSTNAME,
 	    CURLOPT_HTTPHEADER		=> [
 		    'User-Agent: '.set_user_agent(),
 		    'Accept: */*',
 		    'Cache-Control: no-cache',
 	    ]
 	];
+	if($prox_opt === 1){
+		$opts[] = [
+			CURLOPT_PROXY => '127.0.0.1:9050', 
+			CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME,
+		];
+	}
+	return $opts;
 }
 
 function check_base_domain(string $base_domain, string $link_domain, string $scheme){
@@ -569,7 +628,7 @@ function set_user_agent() : string {
     return $agentBrowser[rand(0,3)].'/'.rand(1,8).'.'.rand(0,9).'('.$agentOS[rand(0,6)].' '.rand(1,7).'.'.rand(0,9).'; en-US;)';
 }
 
-function get_public_ip(bool $prox_opt) {
+function get_public_ip(int $prox_opt) {
 	$ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => 'https://ipinfo.io/ip', // alt-'https://httpbin.org/ip', 'ipv4.icanhazip.com'
@@ -578,9 +637,9 @@ function get_public_ip(bool $prox_opt) {
             'User-Agent: '.set_user_agent(),
         ],
     ]);
-    if($prox_opt) {
-		curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
+    if($prox_opt === 1) {
 		curl_setopt($ch, CURLOPT_PROXY, '127.0.0.1:9050');
+		curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
     }
 	$result = curl_exec($ch);
 	curl_close($ch);
