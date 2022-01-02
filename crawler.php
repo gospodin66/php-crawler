@@ -1,11 +1,16 @@
 #!/usr/bin/php
 <?php
 if (PHP_SAPI !== 'cli') { die("Script needs to be run as cli.\r\n"); }
-$short = "p:s:x:";
-$long  = ["path:", "scheme:", "torprox:"];
+$short = "p:s:x:a:m:";
+$long  = ["path:","scheme:","torprox:","args:","method:"];
 $opts = getopt($short,$long);
 if(count($opts) < 2){ 
-    die("Assign [-p]--path <example.com> [-s]--scheme <http/s> (optional) [-x]--torprox <1/0>\r\n");
+    die("> Assign [-p]--path <example.com> ".
+				 "[-s]--scheme <http/s>".
+				 "(optional) [-x]--torprox <1/0>".
+				 "(optional) [-a]--args<a1=x&a2=y>".
+				 "(optional) [-m]--method<GET|POST>\r\n"
+	   );
 }
 $domain = array_key_exists("path", $opts)   ? trim($opts['path'])   : trim($opts['p']);
 $scheme = array_key_exists("scheme", $opts) ? trim($opts['scheme']) : trim($opts['s']);
@@ -13,12 +18,24 @@ if(preg_match('/^((http|https)\:\/\/)/', $domain)){
     $domain = preg_replace('/^((http|https)\:\/\/)/', '', $domain);
 }
 // prox_opt is optional
-if(count($opts) === 3){
-    $prox_opt = array_key_exists("torprox", $opts)
-			  ? intval(trim($opts['torprox']))
-			  : intval(trim($opts['x']));
+if(count($opts) >= 3){
+    $prox_opt = array_key_exists("torprox", $opts) ? intval(trim($opts['torprox'])) : intval(trim($opts['x']));
 } else {
     $prox_opt = 0;
+}
+if(count($opts) >= 4){
+    $args = array_key_exists("args", $opts) ? trim($opts['args']) : trim($opts['a']);
+} else {
+    $args = "";
+}
+if(count($opts) === 5){
+	$method = array_key_exists("method", $opts) ? trim($opts['method']) : trim($opts['m']);
+	if($method !== "POST" && $method !== "GET"){
+		$method = "GET";
+		printf("> Switched to default request method: GET\r\n");
+	}
+} else {
+	$method = "";
 }
 define("TAGS",[
     'a' => 'a',
@@ -55,17 +72,16 @@ if(!file_exists(DATA_DIR)){
 
 $log = "";
 $curl_start = microtime(true);
-$results = exec_curl_request($scheme, $domain, $prox_opt);
+$results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
 $curl_time = microtime(true) - $curl_start;
-if(@!$results['status'] && !empty($results['error'])){
-	die("> Error: ".$results['error']."\r\n> Exit\r\n");
-	
+if(@!$results['status'] && ! empty($results['error'])){
+	die("> Error: {$results['error']}\r\n> Exit\r\n");
 }
 if($results['info']['http_code'] === 403){
-	while(readline('HTTP status 403, repeat? (y/n): ') === 'y'){
-		$results = exec_curl_request($scheme, $domain, $prox_opt);
-		if(@!$results['status'] && !empty($results['error'])){
-			die("> Error: ".$results['error']."\r\n> Exit\r\n");
+	while(readline('> HTTP response status 403, re-send request? (y/n): ') === 'y'){
+		$results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
+		if(@!$results['status'] && ! empty($results['error'])){
+			die("> Error: {$results['error']}\r\n> Exit\r\n");
 		}
 		if($results['info']['http_code'] !== 403){
 			break;
@@ -92,13 +108,15 @@ $log .= "> Public IP: [".trim($public_ip)."]\r\n".
 	    "> [$_time] > URL: ".$domain."\r\n".
 	    "> [$_time] > Host: {$results['host']} | down/up speed: {$calc_down_speed}/{$calc_up_speed}\r\n".
 	    sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n", $page_size).
-	    sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size);
+	    sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size).
+		"> Res code:  [{$results['http_code']}]";
 
 printf("> Public IP: [".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
 	   "> Page size: [".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
-	   "> Len: %6s[".COLOR_CYAN."%d bytes".COLOR_RESET."]\r\n".
+	   "> Length: %3s[".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
+	   "> Res code:%2s[".COLOR_CYAN."%d".COLOR_RESET."]\r\n".
 	   "> Time: %5s[".COLOR_CYAN."%s".COLOR_RESET."]\r\n",
-	   trim($public_ip), $page_size, ' ', $res_size, ' ', $exectime
+	   trim($public_ip), $page_size, ' ', $res_size, ' ', $results['http_code'], ' ', $exectime
 	  );
 
 file_put_contents(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".txt", $log, FILE_APPEND);
@@ -110,14 +128,14 @@ $doc = new DOMDocument();
 $title = $doc->getElementsByTagName("title");
 @$title = $title->item(0)->nodeValue;
 
-$hrefs = _get_elements($doc,TAGS['a'],"{$scheme}://{$domain}");
-$lists = _get_elements($doc,TAGS['li'],"{$scheme}://{$domain}");
-$imgs = _get_elements($doc,TAGS['img'],"{$scheme}://{$domain}");
-$metas = _get_elements($doc,TAGS['meta'],"{$scheme}://{$domain}");
-$links = _get_elements($doc,TAGS['link'],"{$scheme}://{$domain}");
-$forms = _get_elements($doc,TAGS['form'],"{$scheme}://{$domain}");
-$tables = _get_elements($doc,TAGS['table'],"{$scheme}://{$domain}");
-$scripts = _get_elements($doc,TAGS['script'],"{$scheme}://{$domain}");
+$hrefs = extract_html_elements($doc,TAGS['a'],"{$scheme}://{$domain}");
+$lists = extract_html_elements($doc,TAGS['li'],"{$scheme}://{$domain}");
+$imgs = extract_html_elements($doc,TAGS['img'],"{$scheme}://{$domain}");
+$metas = extract_html_elements($doc,TAGS['meta'],"{$scheme}://{$domain}");
+$links = extract_html_elements($doc,TAGS['link'],"{$scheme}://{$domain}");
+$forms = extract_html_elements($doc,TAGS['form'],"{$scheme}://{$domain}");
+$tables = extract_html_elements($doc,TAGS['table'],"{$scheme}://{$domain}");
+$scripts = extract_html_elements($doc,TAGS['script'],"{$scheme}://{$domain}");
 
 $main_request_results = [$links,$metas,$hrefs,$imgs,$scripts,$forms,$lists,$tables];
 $json = json_encode($main_request_results);
@@ -128,8 +146,7 @@ while(1){
 	print "\r\n> Options:".
 			"\r\n> p -print main webpage results".
 			"\r\n> s -save main webpage results".
-			"\r\n> j -read json file".
-			"\r\n> l -fetch elements by type".
+			"\r\n> j -fetch elements by type".
 			"\r\n> f -follow webpage links".
 			"\r\n> e -exit\r\n";
 	switch (readline("> ")) {
@@ -139,11 +156,6 @@ while(1){
 			break;
 
         case 'j':
-            $eles = read_json($jpath);
-            printf("> File [%s] read successfuly\r\n", $jpath);
-            break;
-
-        case 'l':
             switch (readline("> Enter element to filter: ")) {
                 case 'img':
                     $filter_el = 'img';
@@ -170,6 +182,8 @@ while(1){
                     $filter_el = 'a';
                     break;
             }
+			$eles = read_json($jpath);
+            printf("> File [%s] read successfuly\r\n", $jpath);
 			$eles_by_type = [];
             recursive_filter_elements($eles, $eles_by_type, $filter_el);
 			recursive_read_elements($eles_by_type);
@@ -180,12 +194,12 @@ while(1){
 			printf("\r\n> Successfuly saved file > [%s]\r\n", $jpath);
 			break;
             
-		case 'e':
-			break 2;
-
-        case 'f':
+		case 'f':
 			follow_links($opts,$doc,$parsed_url['host'],$scheme,$prox_opt);
 			break;
+
+		case 'e':
+			break 2;
 
 	 	default:
 			print(COLOR_RED."> Invalid argument".COLOR_RESET."\r\n");
@@ -269,9 +283,6 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 				$log .= "> [{$time}] > Warning | [Broken path] > [{$url}]\r\n";
 				break;
             }
-			if(in_array($url, $crawled)){
-			   break;  
-			}
 			$log .= "> [{$time}] > URL: [{$url}]\r\n";
             // invalid url format
 			if(preg_match($url_regex, $url) === 0){ 
@@ -309,18 +320,22 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 					  );
 				continue;
 			}
+			if(in_array($url, $crawled)){
+				break;  
+			}
 			$curl_start = microtime(true);
 			$results = exec_curl_request($scheme, $url, $prox_opt);
 			$curl_time = microtime(true) - $curl_start;
 			$exectime = get_exec_time($curl_time);
-			if(@!$results['status'] && !empty($results['error'])){
+			if(@!$results['status'] && ! empty($results['error'])){
 				$log .= "> [{$time}] > {$results['error']}\r\n";
 				printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
 							"| [%d] ".
 							"| [%s] ".
 							"| [".COLOR_RED."%s".COLOR_RESET."] ".
-							"| [".COLOR_RED."%s".COLOR_RESET."]\r\n",
-							' ', count($crawled), $url, $results['error'], $exectime,
+							"| [".COLOR_RED."%s".COLOR_RESET."] ".
+							"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
+							' ', count($crawled), $url, $results['error'], $exectime, $results['http_code']
 					  );
 				continue;
 			}
@@ -343,23 +358,37 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 			$doc = new DOMDocument();
 			@$doc->loadHTML($results['page']);
 
-			printf("> ".COLOR_CYAN."Success".COLOR_RESET." ".
+			if($results['http_code'] >= 200 && $results['http_code'] < 300){
+				$http_code_color = COLOR_CYAN;
+				$response = "Success";
+				$indent = '';
+			} else if($results['http_code'] >= 300 && $results['http_code'] < 400){
+				$http_code_color = COLOR_LIGHT_BLUE;
+				$response = "Redir";
+				$indent = ' ';
+			} else {
+				$http_code_color = COLOR_RED;
+				$response = "Error";
+				$indent = ' ';
+			}
+			printf("> {$http_code_color}{$response}".COLOR_RESET.($results['http_code'] === 200 ? "%s " : "%3s").
 						"| [%d] ".
 						"| [%s] ".
-						"| [".COLOR_CYAN."%s".COLOR_RESET."] ".
-						"| [".COLOR_CYAN."%s".COLOR_RESET."]\r\n",
-						(count($crawled)-1), $url, $res_size, $exectime,
+						"| [{$http_code_color}%s".COLOR_RESET."] ".
+						"| [{$http_code_color}%s".COLOR_RESET."] ".
+						"| [{$http_code_color}%d".COLOR_RESET."]\r\n",
+						$indent, (count($crawled)-1), $url, $res_size, $exectime, $results['http_code']
 				  );
 			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
 		}
-		$hrefs [TAGS['a'].$key] = _get_elements($doc,TAGS['a'],$url);		
-		$lists [TAGS['li'].$key] = _get_elements($doc,TAGS['li'],$url);
-		$imgs [TAGS['img'].$key] = _get_elements($doc,TAGS['img'],$url);
-		$links [TAGS['link'].$key] = _get_elements($doc,TAGS['link'],$url);
-		$metas [TAGS['meta'].$key] = _get_elements($doc,TAGS['meta'],$url);
-		$forms [TAGS['form'].$key] = _get_elements($doc,TAGS['form'],$url);
-		$tables [TAGS['table'].$key] = _get_elements($doc,TAGS['table'],$url);
-		$scripts [TAGS['script'].$key] = _get_elements($doc,TAGS['script'],$url);
+		$hrefs [TAGS['a'].$key] = extract_html_elements($doc,TAGS['a'],$url);		
+		$lists [TAGS['li'].$key] = extract_html_elements($doc,TAGS['li'],$url);
+		$imgs [TAGS['img'].$key] = extract_html_elements($doc,TAGS['img'],$url);
+		$links [TAGS['link'].$key] = extract_html_elements($doc,TAGS['link'],$url);
+		$metas [TAGS['meta'].$key] = extract_html_elements($doc,TAGS['meta'],$url);
+		$forms [TAGS['form'].$key] = extract_html_elements($doc,TAGS['form'],$url);
+		$tables [TAGS['table'].$key] = extract_html_elements($doc,TAGS['table'],$url);
+		$scripts [TAGS['script'].$key] = extract_html_elements($doc,TAGS['script'],$url);
     }
 	$json = json_encode([$links,$metas,$imgs,$scripts,$hrefs,$forms,$lists,$tables]);
 	$app_time = microtime(true) - $app_start;
@@ -369,9 +398,8 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 	{
 		printf("\r\n> Options: ".
 				"\r\n> p -print all results".
-				"\r\n> j -decode json file".
-				"\r\n> l -fetch elements by type".
 				"\r\n> s -save [JSON file size: %s]".
+				"\r\n> j -fetch elements by type".
 				"\r\n> r -return\r\n",
 				format_file_size(strlen($json))
 			  );
@@ -381,11 +409,6 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 				break 2;
 
             case 'j':
-                $eles = read_json(__DIR__."/".DATA_DIR.$domain.".json");
-                printf("> JSON file read successfuly\r\n");
-                break;
-
-            case 'l':
                 switch (readline("Enter element to filter: > ")) {
                     case 'img':
                         $filter_el = 'img';
@@ -412,6 +435,8 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                         $filter_el = 'a';
                         break;
                 }
+				$eles = read_json(__DIR__."/".DATA_DIR.$domain.".json");
+                printf("> JSON file read successfuly\r\n");
                 $eles_by_type = fetch_html_elements_by_type($eles, $filter_el);
                 if(file_put_contents(__DIR__."/".DATA_DIR.$domain.".filtered.json", json_encode($eles_by_type)) !== false){
                     print("> Fitered elements saved to file successfuly\r\n");
@@ -463,19 +488,20 @@ function format_file_size(int $size) : string {
 
 function get_exec_time(float $time) : string {
 	// $micro = html_entity_decode('&#956;'); // greek "micro" character
-	$color = $time < 5 ? COLOR_CYAN : COLOR_RED;
+	$color = $time < 5 ? COLOR_CYAN :($time > 5 && $time < 10 ? COLOR_YELLOW : COLOR_RED);
 	return sprintf("\033{$color}%.2fs".COLOR_RESET, $time);
 }
 
-function exec_curl_request(string $scheme, string $url, int $prox_opt) : array {
+function exec_curl_request(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
 	$ch = curl_init();
-	$opts = select_opts($scheme,$url,$prox_opt);
+	$opts = select_opts($scheme,$url,$prox_opt,$args,$method);
 	curl_setopt_array($ch, $opts);
 	$page = curl_exec($ch);
 	$curlinfo = curl_getinfo($ch);
 	$cookies = curl_getinfo($ch, CURLINFO_COOKIELIST);
 	$host = "{$curlinfo['primary_ip']}:{$curlinfo['primary_port']}";
 	$speed = "{$curlinfo['speed_download']}/{$curlinfo['speed_upload']}";
+	$http_code = $curlinfo['http_code'];
 	if(curl_errno($ch)){
 		$error = "Crawler error: ".curl_error($ch);
 		curl_close($ch);
@@ -491,19 +517,20 @@ function exec_curl_request(string $scheme, string $url, int $prox_opt) : array {
 		'host' => $host,
 		'speed' => $speed,
 		'cookies' => $cookies,
+		'http_code' => $http_code,
 	];
 }
 
-function select_opts(string $scheme, string $url, int $prox_opt) : array {
+function select_opts(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
 	$opts = [
-		CURLOPT_URL 			=> preg_match('/^'.$scheme.'./', $url) ? $url : "{$scheme}://{$url}",
+		CURLOPT_URL 			=> preg_match('/^'.$scheme.'/', $url) ? $url : "{$scheme}://{$url}",
 	    CURLOPT_HEADER 			=> 1,
 	    CURLOPT_VERBOSE 		=> 0, // 0 normally
 	    CURLOPT_RETURNTRANSFER 	=> 1,
-	    CURLOPT_CONNECTTIMEOUT 	=> 30,	
-	    CURLOPT_TIMEOUT        	=> 30,	
-	    CURLOPT_SSL_VERIFYPEER  => $scheme == 'https' ? 1 : 0,
-	    CURLOPT_SSL_VERIFYHOST  => $scheme == 'https' ? 2 : 0,
+	    CURLOPT_CONNECTTIMEOUT 	=> 30,
+	    CURLOPT_TIMEOUT        	=> 30,
+	    CURLOPT_SSL_VERIFYPEER  => $scheme === 'https' ? 1 : 0,
+	    CURLOPT_SSL_VERIFYHOST  => $scheme === 'https' ? 2 : 0,
 	    CURLOPT_FOLLOWLOCATION	=> 1,
 	    CURLOPT_MAXREDIRS 		=> 5,
 		CURLOPT_COOKIEJAR		=> 'session/SessionCookies.txt',
@@ -515,10 +542,23 @@ function select_opts(string $scheme, string $url, int $prox_opt) : array {
 	    ]
 	];
 	if($prox_opt === 1){
-		$opts[] = [
-			CURLOPT_PROXY => '127.0.0.1:9050', 
-			CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME,
-		];
+		$opts += [CURLOPT_PROXY => '127.0.0.1:9050'];
+		$opts += [CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME];
+	}
+	if( ! empty($args)){
+		if( ! empty($method) && $method === "POST"){
+			$args_temp_arr = explode("&",$args);
+			$args_temp = [];
+			$args_arr = [];
+			foreach ($args_temp_arr as $ak => $a) {
+				$args_temp = explode("=", $a);
+				$args_arr[$args_temp[0]] = $args_temp[1]; 
+			}
+			$opts += [CURLOPT_POST => 1];
+			$opts += [CURLOPT_POSTFIELDS => $args_arr];
+		} else {
+			$opts[CURLOPT_URL] = $opts[CURLOPT_URL]."/?{$args}";
+		}
 	}
 	return $opts;
 }
@@ -544,7 +584,7 @@ function check_base_domain(string $base_domain, string $link_domain, string $sch
 	return ($base_top_domain === $link_top_domain); 
 }
 
-function _get_elements($doc, string $tag, string $url) : array {
+function extract_html_elements(object $doc, string $tag, string $url) : array {
 	$eles = $doc->getElementsByTagName($tag);
 	if(empty($eles[0])){
 		return [];
@@ -649,7 +689,7 @@ function read_json(string $file) : array {
     return ! empty($json_decoded) ? $json_decoded : [];
 }
 
-function fetch_html_elements_by_type(array $elements, string $filter_element) : array {
+function fetch_html_elements_by_type($elements, string $filter_element) : array {
     $data = [];
     if(empty($elements)){
         return $data;
@@ -658,7 +698,7 @@ function fetch_html_elements_by_type(array $elements, string $filter_element) : 
     return ! empty($data) ? $data : [];
 }
 
-function recursive_loop_child_elements($element, &$el_elements) {
+function recursive_loop_child_elements($element, &$el_elements) : void {
 	if(is_iterable($element)){
 		$cnt = 0;
 		foreach ($element as $key => $el) {
@@ -706,8 +746,8 @@ function recursive_loop_child_elements($element, &$el_elements) {
 	}
 }
 
-function recursive_filter_elements($element, &$data, string $filter_element) {
-	foreach ($element as $k => $el_vals) {
+function recursive_filter_elements($elements, &$data, string $filter_element) : void {
+	foreach ($elements as $k => $el_vals) {
 		if(is_iterable($el_vals) && ! empty($el_vals)){
 			recursive_filter_elements($el_vals, $data, $filter_element);
 		}
@@ -723,7 +763,7 @@ function recursive_filter_elements($element, &$data, string $filter_element) {
 	}
 }
 
-function recursive_read_elements($elements) {
+function recursive_read_elements($elements) : void {
 	foreach ($elements as $key => $el) {
 		if(is_object($el) || is_array($el)) {
 			recursive_read_elements($el);
@@ -736,8 +776,8 @@ function recursive_read_elements($elements) {
 				$k = str_replace('_', ' ', $key);
 			}
 			printf("{$color}%s: %s".COLOR_RESET, $k, $el);
+			printf("\r\n");
 		}
-		printf("\r\n");
 	}
 }
 
