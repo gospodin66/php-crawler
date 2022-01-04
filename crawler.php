@@ -276,17 +276,17 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             $remote_filesize_final = format_file_size_to_str($remote_filesize);
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
                         " [%d] [%d/%d] ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
                         " [%s]\r\n".
                         "%-{$indent_len}s [".COLOR_YELLOW."Content URL ".COLOR_RESET.
                         "> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
                         "> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
                         count($crawled), $key, $hrefs_total,
-						0, ' ',// res_size
-						0, ' ',// exectime
-						0, ' ',// http_code
+                        0, ' ',// res_size
+                        0, ' ',// exectime
+                        0, ' ',// http_code
                         $url,
                         ' ',
                         $remote_filesize_final,
@@ -301,15 +301,15 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         else if(preg_match(SCRIPT_REGEX, $url, $matches)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
                         " [%d] [%d/%d] ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
                         " [%s]\r\n".
                         "%-{$indent_len}s [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
                         count($crawled), $key, $hrefs_total,
-						0, ' ',// res_size
-						0, ' ',// exectime
-						0, ' ',// http_code
+                        0, ' ',// res_size
+                        0, ' ',// exectime
+                        0, ' ',// http_code
                         $url,
                         ' ',
                         $matches[0],
@@ -322,17 +322,17 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         else if(preg_match("/^(mailto:|tel:)/", $url)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
                         " [%d] [%d/%d] ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
                         " [%s]\r\n".
                         "%-{$indent_len}s [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
                         count($crawled), $key, $hrefs_total,
-						0, ' ',// res_size
-						0, ' ',// exectime
-						0, ' ',// http_code
+                        0, ' ',// res_size
+                        0, ' ',// exectime
+                        0, ' ',// http_code
                         $url,
-						' ',
+                        ' ',
                   );
             $log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
             file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
