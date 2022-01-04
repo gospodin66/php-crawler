@@ -326,13 +326,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
 						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
                         " [%s]\r\n".
-                        " [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
-                        ' ',
+                        "%-{$indent_len}s [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
                         count($crawled), $key, $hrefs_total,
 						0, ' ',// res_size
 						0, ' ',// exectime
 						0, ' ',// http_code
                         $url,
+						' ',
                   );
             $log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
             file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
