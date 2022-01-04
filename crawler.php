@@ -56,6 +56,13 @@ define("COLOR_BLUE",COLOR_PREFIX."[34m");
 define("COLOR_LIGHT_BLUE",COLOR_PREFIX."[94m");
 define("COLOR_CYAN",COLOR_PREFIX."[36m");
 define("COLOR_WHITE",COLOR_PREFIX."[37m");
+define("URL_REGEX", "/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\/\S*)?/");
+// .(x)apk | .ipa | .mp3(4) | .jp(e)g | .png | .pdf | .doc(x) | .odt | .xls
+define("CONTENT_REGEX", "/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)|(\.pdf$)|(\.doc(x){0,1}$)|(\.odt$)|(\.xls(x){0,1}$)/");
+// .js | javascript url | .php | .py | asp(x)
+define("SCRIPT_REGEX", "/(\.js$)|(\.php$)|(^javascript:)|(\.py$)|(\.asp(x){0,1}$)/");
+define("BROKEN_URL_REGEX", "/(^(\s)+$)|(^_blank)|(^[_|#])/");
+define("MAX_RETRY_CONN_NUM", 5);
 if( ! defined('DATA_DIR')){
 	define("DATA_DIR", "scrapped/");
 }
@@ -83,7 +90,7 @@ if(@!$results['status'] && ! empty($results['error'])){
 if( ! empty($results['info']['redirect_url'])){
 	$micro = html_entity_decode('&#956;');
 	printf("> ".COLOR_YELLOW."Redir".COLOR_RESET."%3s".
-			"| [%d] ".
+			"| [%d] | [%d/%d] ".
 			"| [%s] ".
 			"| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
 			"| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
@@ -98,8 +105,12 @@ if( ! empty($results['info']['redirect_url'])){
 			$results['info']['redirect_time'],
 		  );
 }
+
 if($results['info']['http_code'] === 403){
+	$retry_cnt = 0;
 	while(readline('> HTTP response status 403, re-send request? (y/n): ') === 'y'){
+		$retry_cnt++;
+		printf("> Re-send attempts: [{$retry_cnt}]");
 		$results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
 		if(@!$results['status'] && ! empty($results['error'])){
 			die("> Error: {$results['error']}\r\n> Exit\r\n");
@@ -109,24 +120,21 @@ if($results['info']['http_code'] === 403){
 		}
 	}
 }
-$res_size = format_file_size($results['info']['size_download']);
-$page_size = format_file_size(strlen($results['page']));
+$res_size = format_file_size_to_str($results['info']['size_download']);
+$page_size = format_file_size_to_str(strlen($results['page']));
 
-$_time = date("Y-m-d H:i:s");
 if($prox_opt === 1) {
 	$log .= "> Using tor SOCKS5 proxy\r\n";
 	printf("\r\n> Using Tor SOCKS5 proxy\r\n");
 }
 
-$down_numeric = substr($results['speed'], 0, strpos($results['speed'], '/'));
-$up_numeric = substr($results['speed'], strpos($results['speed'], '/') +1);
-
-$calc_down_speed = format_file_size($down_numeric);
-$calc_up_speed = format_file_size($up_numeric);
-
 $log .= "> Public IP: [".trim($public_ip)."]\r\n".
-	    "> [$_time] > URL: ".$domain."\r\n".
-	    sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n", $results['host'], $calc_down_speed, $calc_up_speed).
+	    "> [".date("Y-m-d H:i:s")."] > URL: ".$domain."\r\n".
+	    sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n",
+					$results['host'],
+					format_file_size_to_str($results['info']['speed_download']),
+					format_file_size_to_str($results['info']['speed_upload'])
+			   ).
 	    sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n", $page_size).
 	    sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size).
 	    sprintf("\t\t\t\t\t\t> Response code: [%d]\r\n", $results['info']['http_code']);
@@ -241,68 +249,66 @@ exit(0);
 function create_entity_dir(string $target_dir) : bool {
 	if( ! file_exists($target_dir)){
 		if( ! mkdir($target_dir, 0755, true)){
-			printf("> Error creating target dir: %s\r\n", $target_dir);
+			printf("> Error creating target dir: [%s]\r\n", $target_dir);
 			return false;
 		}
-		printf("> Target dir created: %s\r\n", $target_dir);
+		printf("> Target dir created: [%s]\r\n", $target_dir);
 		return true;
 	}
+	printf("> Target dir already exists: [%s]\r\n", $target_dir);
 	return true;
 }
 
 function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir){
 	
 	$href_links = $doc->getElementsByTagName('a');
-	$url_regex = "/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\/\S*)?/";
 	$crawled = $links = $metas = $hrefs = $imgs = $scripts = $forms = $lists = $tables = [];
     $cnt = 0;
 	$app_start = microtime(true);
-
+	$hrefs_total = count($href_links) -1;
 	create_entity_dir("{$target_dir}/links");
 
-	foreach ($href_links as $key => $a)
-	{	
+	foreach ($href_links as $key => $a) {	
 		$log = "";
 		$url = trim($a->getAttribute('href'));
 		$time = date("Y-m-d H:i:s");
-
 		// skip empty | broken
-		if(empty($url) || $url[0] === '#' || $url[0] === '_' || preg_match('/^(\s)+$/', $url) || preg_match("/^(_blank)/", $url)) {
+		if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
 			printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-					"| [%d] ".
+					"| [%d] | [%d/%d] ".
 					"| [%s] ".
 					"| [".COLOR_YELLOW."Empty/broken path".COLOR_RESET."]\r\n",
-					count($crawled), $url
+					count($crawled), $key, $hrefs_total, $url
 				  );
 			$log .= "> [{$time}] > Warning | [Empty/broken path] > [{$url}]\r\n";
 			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;	
 		}
 		// do not download content!
-		else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)|(\.pdf$)|(\.doc(x){0,1}$)|(\.odt$)/", $url, $matches)) {
+		else if(preg_match(CONTENT_REGEX, $url, $matches)) {
 			$remote_filesize = exec_remote_filesize_request($url);
-			$remote_filesize_final = format_file_size($remote_filesize);
+			$remote_filesize_final = format_file_size_to_str($remote_filesize);
 			printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-						"| [%d] ".
+						"| [%d] | [%d/%d] ".
 						"| [%s] ".
 						"| [".COLOR_YELLOW."Content URL ".COLOR_RESET.
 						"> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
 						"> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
-						count($crawled), $url, $remote_filesize_final, $matches[0]
+						count($crawled), $key, $hrefs_total, $url, $remote_filesize_final, $matches[0]
 				  );
 			$log .= "> [{$time}] > Warning | [Content URL > [{$remote_filesize_final}] > [{$url}]]\r\n";
 			file_put_contents("{$target_dir}/results/content.txt", "{$url}\r\n", FILE_APPEND);
 			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
 		}
-		// do not exec .js | javascript url | .php | .py
-		else if(preg_match("/(\.js$)|(\.php$)|(javascript:)|(\.py)/", $url, $matches)) {
+		// do not exec scripts!
+		else if(preg_match(SCRIPT_REGEX, $url, $matches)) {
 			printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-						"| [%d] ".
+						"| [%d] | [%d/%d] ".
 						"| [%s] ".
 						"| [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
-						count($crawled), $url, $matches[0]
-					);
+						count($crawled), $key, $hrefs_total, $url, $matches[0]
+				  );
 			$log .= "> [{$time}] > Warning | [Script format: {$matches[0]}] > [{$url}]\r\n";
 			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
@@ -310,39 +316,33 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		// skip mailto: | tel:
 		else if(preg_match("/^(mailto:|tel:)/", $url)) {
 			printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-						"| [%d] ".
+						"| [%d] | [%d/%d] ".
 						"| [%s] ".
 						"| [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
-						count($crawled), $url
-					);
+						count($crawled), $key, $hrefs_total, $url
+				  );
 			$log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
 			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
 		}
 
-		// invalid url format => craft new
-		if(preg_match($url_regex, $url) === 0) {
+		// invalid url format => adapt
+		if(preg_match(URL_REGEX, $url) === 0) {
 			// save rel links before adaptation
 			file_put_contents("{$target_dir}/links/rel.txt", "{$url}\r\n", FILE_APPEND);
 			if($url[0] === "/" && substr($url, 0, 2) !== "//") {
 				$url = "{$scheme}://{$domain}{$url}";
-			}
-			// TODO: test case
-			else if(substr($url, 0, 2) === "./") {
+			} else if(substr($url, 0, 2) === "./") {
+				// => example.com/./some/path = example.com/path
 				$url = "{$scheme}://{$domain}/".basename($url);
-				var_dump("CASE TEST ./ ->", $url);
-			}
-			// TODO: test case
-			else if(substr($url, 0, 3) === "../") {
-				$url = "{$scheme}://{$domain}/".realpath($url)."/".basename($url);
-				var_dump("CASE TEST ../ ->", $url);
-			}
-			else {
+			} else if(substr($url, 0, 3) === "../") {
+				// => example.com/../some/path = example.com/path
+				$url = "{$scheme}://{$domain}/".realpath($url).basename($url);
+			} else {
 				$url = "{$scheme}://{$domain}/{$url}";
 			}
-		}
-		// default abs url format
-		else {
+
+		} else { 
 			file_put_contents("{$target_dir}/links/abs.txt", "{$url}\r\n", FILE_APPEND);
 		}
 
@@ -352,10 +352,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		}
 		if( ! validate_base_domain($domain,$url,$scheme)){
 			printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-						"| [%d] ".
+						"| [%d] | [%d/%d] ".
 						"| [%s] ".
 						"| [".COLOR_RED."Invalid base domain".COLOR_RESET."]\r\n",
-						' ', count($crawled), $url
+						' ', count($crawled), $key, $hrefs_total, $url
 				  );
 			$log .= "> [{$time}] > Invalid base domain [{$url}]\r\n";
 			continue;
@@ -369,7 +369,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 
 		if( ! empty($results['info']['redirect_url'])){
 			printf("> ".COLOR_YELLOW."Redir".COLOR_RESET."%3s".
-					"| [%d] ".
+					"| [%d] | [%d/%d] ".
 					"| [%s] ".
 					"| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
 					"| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
@@ -377,44 +377,45 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 					"| [".COLOR_YELLOW."%d".COLOR_RESET."] ".
 					"| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
 					"| [".COLOR_YELLOW."%.2f".COLOR_RESET."]\r\n",
-					' ', count($crawled), $url, $results['error'], $exectime, $results['info']['http_code'],
+					' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime,
+					$results['info']['http_code'],
 					$results['info']['redirect_count'],
 					$results['info']['redirect_url'],
 					$results['info']['redirect_time'],
 				  );
 			$log .= "> [{$time}] > [HTTP response code - redirect] > [{$results['info']['http_code']}]\r\n";
+			// continue;
 		}
-
 		if(@!$results['status'] && ! empty($results['error'])){
 			printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-						"| [%d] ".
+						"| [%d] | [%d/%d] ".
 						"| [%s] ".
 						"| [".COLOR_RED."%s".COLOR_RESET."] ".
 						"| [".COLOR_RED."%s".COLOR_RESET."] ".
 						"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-						' ', count($crawled), $url, $results['error'], $exectime, $results['info']['http_code']
+						' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime, $results['info']['http_code']
 				  );
 			$log .= "> [{$time}] > {$results['error']}\r\n";
 			continue;
 		}
-		// retry 5 times if 403
+		// re-send request if 403
 		if($results['info']['http_code'] === 403){
-			for($i = 0; $i < 5; $i++){
-				printf(">%8s | [%d] ".
+			for($i = 1; $i <= MAX_RETRY_CONN_NUM; $i++){
+				printf(">%8s | [%d] | [%d/%d] ".
 							"| [%s] ".
-							"| [".COLOR_YELLOW."HTTP response status 403, re-send attempts: [{$i}/5]".COLOR_RESET."]\r\n",
-							' ', count($crawled), $url
+							"| [".COLOR_YELLOW."HTTP response status 403, re-send attempt: [{$i}/".MAX_RETRY_CONN_NUM."]".COLOR_RESET."]\r\n",
+							' ', count($crawled), $key, $hrefs_total, $url
 					  );
 				$results = exec_curl_request($scheme, $url, $prox_opt);
 				if(@!$results['status'] && ! empty($results['error'])){
-					$log .= "> [{$time}] > {$results['error']} > attempts: [{$i}/5]\r\n";
+					$log .= "> [{$time}] > {$results['error']} > attempts: [{$i}/".MAX_RETRY_CONN_NUM."]\r\n";
 					printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-							"| [%d] ".
+							"| [%d] | [%d/%d] ".
 							"| [%s] ".
 							"| [".COLOR_RED."%s".COLOR_RESET."] ".
 							"| [".COLOR_RED."%s".COLOR_RESET."] ".
 							"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-							' ', count($crawled), $url, $results['error'], $exectime, $results['info']['http_code']
+							' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime, $results['info']['http_code']
 						  );
 				}
 				if($results['info']['http_code'] !== 403){
@@ -425,30 +426,28 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		if($results['info']['http_code'] >= 400){
 			$errmsg = "HTTP error response code";
 			printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-					"| [%d] ".
+					"| [%d] | [%d/%d] ".
 					"| [%s] ".
 					"| [".COLOR_RED."%s".COLOR_RESET."] ".
 					"| [".COLOR_RED."%s".COLOR_RESET."] ".
 					"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-					' ', count($crawled), $url, $errmsg, $exectime, $results['info']['http_code']
+					' ', count($crawled), $key, $hrefs_total, $url, $errmsg, $exectime, $results['info']['http_code']
 				  );
 			$log .= "> [{$time}] > [{$errmsg}] > [{$results['info']['http_code']}]\r\n";
 			continue;
 		}
 
 		$crawled[] = $url;
-
-		$down_numeric = intval(substr($results['speed'], 0, strpos($results['speed'], '/')));
-		$up_numeric = intval(substr($results['speed'], strpos($results['speed'], '/') +1));
-
-		$calc_down_speed = format_file_size($down_numeric);
-		$calc_up_speed = format_file_size($up_numeric);
-		$res_size = format_file_size($results['info']['size_download']);
-		$page_size = format_file_size(strlen($results['page']));
-
+		$res_size = format_file_size_to_str($results['info']['size_download']);
 		$log .= "> [{$time}] > URL: [{$url}]\r\n".
-				sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n", $results['host'], $calc_down_speed, $calc_up_speed).
-				sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n", $page_size).
+				sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n",
+							$results['host'],
+							format_file_size_to_str($results['info']['speed_download']),
+							format_file_size_to_str($results['info']['speed_upload'])
+					   ).
+				sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n",
+							format_file_size_to_str(strlen($results['page']))
+					   ).
 				sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size);
 		file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 		$log = "";
@@ -456,29 +455,23 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		$doc = new DOMDocument();
 		@$doc->loadHTML($results['page']);
 
-		if($results['info']['http_code'] >= 200 && $results['info']['http_code'] < 300){
-			$http_code_color = COLOR_GREEN;
-			$response = "Success";
-			$indent = '';
-		} else if($results['info']['http_code'] >= 300 && $results['info']['http_code'] < 400){
-			$http_code_color = COLOR_LIGHT_BLUE;
-			$response = "Redir";
-			$indent = ' ';
-		} else {
-			$http_code_color = COLOR_RED;
-			$response = "Error";
-			$indent = ' ';
-		}
+		$res_elements = get_response_elements($results['info']['http_code']);
 
 		printf(
-			"> {$http_code_color}{$response}".COLOR_RESET.
+			"> {$res_elements['color']}{$res_elements['response']}".COLOR_RESET.
 			($results['info']['http_code'] === 200 ? "%s " : "%3s").
-			"| [%d] ".
+			"| [%d] | [%d/%d] ".
 			"| [%s] ".
-			"| [{$http_code_color}%s".COLOR_RESET."] ".
-			"| [{$http_code_color}%s".COLOR_RESET."] ".
-			"| [{$http_code_color}%d".COLOR_RESET."]\r\n",
-			$indent, (count($crawled)-1), $url, $res_size, $exectime, $results['info']['http_code']
+			"| [{$res_elements['color']}%s".COLOR_RESET."] ".
+			"| [{$res_elements['color']}%s".COLOR_RESET."] ".
+			"| [{$res_elements['color']}%d".COLOR_RESET."]\r\n",
+			$res_elements['indent'],
+			count($crawled) -1,
+			$key, $hrefs_total,
+			$url,
+			$res_size,
+			$exectime,
+			$results['info']['http_code']
 		);
 		
 		$hrefs [TAGS['a'].$key] = extract_html_elements($doc,TAGS['a'],$url);		
@@ -502,7 +495,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 				"\r\n> s -save [JSON file size: %s]".
 				"\r\n> j -fetch elements by type".
 				"\r\n> r -return\r\n",
-				format_file_size(strlen($json))
+				format_file_size_to_str(strlen($json))
 			  );
 
 		$resultsdir = "{$target_dir}/results";
@@ -567,6 +560,16 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 	return;
 }
 
+function get_response_elements(int $code) : array {
+	return (($code >= 200 && $code < 300)
+		   ? ['color' => COLOR_GREEN, 'response' => "Success", 'indent' => '',]
+		   :(($code >= 300 && $code < 400)
+				?['color' => COLOR_LIGHT_BLUE, 'response' => "Redir", 'indent' => ' ']
+				:['color' => COLOR_RED, 'response' => "Error", 'indent' => ' ']
+			)
+	);
+}
+
 function exec_remote_filesize_request(string $url) : float {
 	$ch = curl_init($url);
 	curl_setopt_array($ch, [
@@ -581,13 +584,14 @@ function exec_remote_filesize_request(string $url) : float {
 	return round($size, 2);
 }
 
-function format_file_size(int $size) : string {
-	return ($res_size = strlen($size) > 6)
-		 			  ? sprintf("%.2fMb", ($size / 1000000))
-		 			  : ((strlen($size) > 3 && strlen($size) < 7)
-						 	? sprintf("%.2fkb", ($size / 1000))
-						 	: sprintf("%.2fb", $size)
-					    );
+function format_file_size_to_str(int $size) : string {
+	$size_str = (string)$size;
+	return strlen($size_str) > 6
+			? sprintf("%.2fMb", ($size / 1000000))
+			: ((strlen($size_str) > 3 && strlen($size_str) < 7)
+				? sprintf("%.2fkb", ($size / 1000))
+				: sprintf("%.2fb", $size)
+		      );
 }
 
 function get_exec_time(float $time) : string {
@@ -617,7 +621,6 @@ function exec_curl_request(
 	$curlinfo = curl_getinfo($ch);
 	$cookies = curl_getinfo($ch, CURLINFO_COOKIELIST);
 	$host = "{$curlinfo['primary_ip']}:{$curlinfo['primary_port']}";
-	$speed = "{$curlinfo['speed_download']}/{$curlinfo['speed_upload']}";
 	if(curl_errno($ch)){
 		$error = "Crawler cURL error: ".curl_error($ch);
 		curl_close($ch);
@@ -636,7 +639,6 @@ function exec_curl_request(
 		'page' => $page,
 		'info' => $curlinfo,
 		'host' => $host,
-		'speed' => $speed,
 		'cookies' => $cookies,
 	];
 }
