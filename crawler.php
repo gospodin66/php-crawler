@@ -341,7 +341,6 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             } else {
                 $url = "{$scheme}://{$domain}/{$url}";
             }
-
         } else { 
             file_put_contents("{$target_dir}/links/abs.txt", "{$url}\r\n", FILE_APPEND);
         }
@@ -646,18 +645,18 @@ function exec_curl_request(
 function select_opts(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
     $opts = [
         CURLOPT_URL             => preg_match('/^'.$scheme.'/', $url) ? $url : "{$scheme}://{$url}",
-        CURLOPT_HEADER             => 1,
+        CURLOPT_HEADER          => 1,
         CURLOPT_VERBOSE         => 0, // 0 normally
-        CURLOPT_RETURNTRANSFER     => 1,
-        CURLOPT_CONNECTTIMEOUT     => 30,
-        CURLOPT_TIMEOUT            => 30,
+        CURLOPT_RETURNTRANSFER  => 1,
+        CURLOPT_CONNECTTIMEOUT  => 30,
+        CURLOPT_TIMEOUT         => 30,
         CURLOPT_SSL_VERIFYPEER  => $scheme === 'https' ? 1 : 0,
         CURLOPT_SSL_VERIFYHOST  => $scheme === 'https' ? 2 : 0,
-        CURLOPT_FOLLOWLOCATION    => 1,
-        CURLOPT_MAXREDIRS         => 5,
-        CURLOPT_COOKIEJAR        => 'session/SessionCookies.txt',
-        CURLOPT_COOKIEFILE        => 'session/SessionCookies.txt',
-        CURLOPT_HTTPHEADER        => [
+        CURLOPT_FOLLOWLOCATION  => 1,
+        CURLOPT_MAXREDIRS       => 5,
+        CURLOPT_COOKIEJAR       => 'session/SessionCookies.txt',
+        CURLOPT_COOKIEFILE      => 'session/SessionCookies.txt',
+        CURLOPT_HTTPHEADER      => [
             'User-Agent: '.set_user_agent(),
             'Accept: */*',
             'Cache-Control: no-cache',
