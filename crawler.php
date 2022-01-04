@@ -87,30 +87,12 @@ $exectime = get_exec_time($curl_time);
 if(@!$results['status'] && ! empty($results['error'])){
     die("> Error: {$results['error']}\r\n> Exit\r\n");
 }
-if( ! empty($results['info']['redirect_url'])){
-    $micro = html_entity_decode('&#956;');
-    printf("> ".COLOR_YELLOW."Redir".COLOR_RESET."%3s".
-            "| [%d] | [%d/%d] ".
-            "| [%s] ".
-            "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-            "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-            "| [".COLOR_YELLOW."%d".COLOR_RESET."] ".
-            "| [".COLOR_YELLOW."%d".COLOR_RESET."] ".
-            "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-            "| [".COLOR_YELLOW."%.2f{$micro}s".COLOR_RESET."]\r\n",
-            ' ', 0, $domain, $results['error'], $exectime,
-            $results['info']['http_code'],
-            $results['info']['redirect_count'],
-            $results['info']['redirect_url'],
-            $results['info']['redirect_time'],
-          );
-}
 
 if($results['info']['http_code'] === 403){
     $retry_cnt = 0;
     while(readline('> HTTP response status 403, re-send request? (y/n): ') === 'y'){
         $retry_cnt++;
-        printf("> Re-send attempts: [{$retry_cnt}]");
+        printf("> Re-send attempts: [{$retry_cnt}]\r\n");
         $results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
         if(@!$results['status'] && ! empty($results['error'])){
             die("> Error: {$results['error']}\r\n> Exit\r\n");
@@ -152,22 +134,12 @@ $log = "";
 
 $doc = new DOMDocument();
 @$doc->loadHTML($results['page']);
-
 $title = $doc->getElementsByTagName("title");
 @$title = $title->item(0)->nodeValue;
-
-$hrefs = extract_html_elements($doc,TAGS['a'],"{$scheme}://{$domain}");
-$lists = extract_html_elements($doc,TAGS['li'],"{$scheme}://{$domain}");
-$imgs = extract_html_elements($doc,TAGS['img'],"{$scheme}://{$domain}");
-$metas = extract_html_elements($doc,TAGS['meta'],"{$scheme}://{$domain}");
-$links = extract_html_elements($doc,TAGS['link'],"{$scheme}://{$domain}");
-$forms = extract_html_elements($doc,TAGS['form'],"{$scheme}://{$domain}");
-$tables = extract_html_elements($doc,TAGS['table'],"{$scheme}://{$domain}");
-$scripts = extract_html_elements($doc,TAGS['script'],"{$scheme}://{$domain}");
-
-$main_request_results = [$links,$metas,$hrefs,$imgs,$scripts,$forms,$lists,$tables];
-$json = json_encode($main_request_results);
-
+$collected_elements = [];
+foreach(TAGS as $key => $tag){
+    $collected_elements[] = extract_html_elements($doc,$tag,"{$scheme}://{$domain}");
+}
 print "\r\n> Successfuly scrapped the main webpage\r\n";
 while(1){
     $jpath = "{$target_dir}/results/main_scrap.json";
@@ -179,7 +151,7 @@ while(1){
             "\r\n> e -exit\r\n";
     switch (readline("> ")) {
         case 'p':
-            recursive_read_elements($main_request_results);
+            recursive_read_elements($collected_elements);
             printf("\r\n");
             break;
 
@@ -218,7 +190,7 @@ while(1){
             break;
 
         case 's':
-            file_put_contents($jpath, json_encode($main_request_results));
+            file_put_contents($jpath, json_encode($collected_elements));
             printf("\r\n> Successfuly saved file > [%s]\r\n", $jpath);
             break;
             
@@ -260,25 +232,39 @@ function create_entity_dir(string $target_dir) : bool {
 }
 
 function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir){
-    
     $href_links = $doc->getElementsByTagName('a');
-    $crawled = $links = $metas = $hrefs = $imgs = $scripts = $forms = $lists = $tables = [];
+    $crawled = [];
     $cnt = 0;
     $app_start = microtime(true);
     $hrefs_total = count($href_links) -1;
     create_entity_dir("{$target_dir}/links");
-
-    foreach ($href_links as $key => $a) {    
+    $all_elements = [];
+    $prev_res_size = $prev_res_exectime = $prev_res_http_code = 0;
+    foreach ($href_links as $key => $a) {
         $log = "";
         $url = trim($a->getAttribute('href'));
         $time = date("Y-m-d H:i:s");
+        $indent_len = (24 + strlen($key)
+                          + strlen($hrefs_total)
+                          + strlen($prev_res_size)
+                          + strlen($prev_res_exectime)
+                          + strlen($prev_res_http_code)
+                      );
         // skip empty | broken
         if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                    "| [%d] | [%d/%d] ".
-                    "| [%s] ".
-                    "| [".COLOR_YELLOW."Empty/broken path".COLOR_RESET."]\r\n",
-                    count($crawled), $key, $hrefs_total, $url
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_YELLOW."Empty/broken path".COLOR_RESET."]\r\n",
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',// res_size
+                    0, ' ',// exectime
+                    0, ' ',// http_code
+                    $url,
+                    ' ',
                   );
             $log .= "> [{$time}] > Warning | [Empty/broken path] > [{$url}]\r\n";
             file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
@@ -289,12 +275,22 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             $remote_filesize = exec_remote_filesize_request($url);
             $remote_filesize_final = format_file_size_to_str($remote_filesize);
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        "| [%d] | [%d/%d] ".
-                        "| [%s] ".
-                        "| [".COLOR_YELLOW."Content URL ".COLOR_RESET.
+                        " [%d] [%d/%d] ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [%s]\r\n".
+                        "%-{$indent_len}s [".COLOR_YELLOW."Content URL ".COLOR_RESET.
                         "> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
                         "> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
-                        count($crawled), $key, $hrefs_total, $url, $remote_filesize_final, $matches[0]
+                        count($crawled), $key, $hrefs_total,
+						0, ' ',// res_size
+						0, ' ',// exectime
+						0, ' ',// http_code
+                        $url,
+                        ' ',
+                        $remote_filesize_final,
+                        $matches[0],
                   );
             $log .= "> [{$time}] > Warning | [Content URL > [{$remote_filesize_final}] > [{$url}]]\r\n";
             file_put_contents("{$target_dir}/results/content.txt", "{$url}\r\n", FILE_APPEND);
@@ -304,10 +300,19 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         // do not exec scripts!
         else if(preg_match(SCRIPT_REGEX, $url, $matches)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        "| [%d] | [%d/%d] ".
-                        "| [%s] ".
-                        "| [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
-                        count($crawled), $key, $hrefs_total, $url, $matches[0]
+                        " [%d] [%d/%d] ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [%s]\r\n".
+                        "%-{$indent_len}s [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
+                        count($crawled), $key, $hrefs_total,
+						0, ' ',// res_size
+						0, ' ',// exectime
+						0, ' ',// http_code
+                        $url,
+                        ' ',
+                        $matches[0],
                   );
             $log .= "> [{$time}] > Warning | [Script format: {$matches[0]}] > [{$url}]\r\n";
             file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
@@ -316,10 +321,18 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         // skip mailto: | tel:
         else if(preg_match("/^(mailto:|tel:)/", $url)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        "| [%d] | [%d/%d] ".
-                        "| [%s] ".
-                        "| [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
-                        count($crawled), $key, $hrefs_total, $url
+                        " [%d] [%d/%d] ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+						" [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [%s]\r\n".
+                        " [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
+                        ' ',
+                        count($crawled), $key, $hrefs_total,
+						0, ' ',// res_size
+						0, ' ',// exectime
+						0, ' ',// http_code
+                        $url,
                   );
             $log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
             file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
@@ -350,12 +363,20 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             continue;  
         }
         if( ! validate_base_domain($domain,$url,$scheme)){
-            printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-                        "| [%d] | [%d/%d] ".
-                        "| [%s] ".
-                        "| [".COLOR_RED."Invalid base domain".COLOR_RESET."]\r\n",
-                        ' ', count($crawled), $key, $hrefs_total, $url
-                  );
+            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+                " [%d] [%d/%d] ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                " [%s]\r\n".
+                "%-{$indent_len}s [".COLOR_YELLOW."Invalid base domain".COLOR_RESET."]\r\n",
+                count($crawled), $key, $hrefs_total,
+                0, ' ',// res_size
+                0, ' ',// exectime
+                0, ' ',// http_code
+                $url,
+                ' ',
+              );
             $log .= "> [{$time}] > Invalid base domain [{$url}]\r\n";
             continue;
         }
@@ -365,56 +386,63 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         $results = exec_curl_request($scheme, $url, $prox_opt);
         $curl_time = microtime(true) - $curl_start;
         $exectime = get_exec_time($curl_time);
-
-        if( ! empty($results['info']['redirect_url'])){
-            printf("> ".COLOR_YELLOW."Redir".COLOR_RESET."%3s".
-                    "| [%d] | [%d/%d] ".
-                    "| [%s] ".
-                    "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-                    "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-                    "| [".COLOR_YELLOW."%d".COLOR_RESET."] ".
-                    "| [".COLOR_YELLOW."%d".COLOR_RESET."] ".
-                    "| [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-                    "| [".COLOR_YELLOW."%.2f".COLOR_RESET."]\r\n",
-                    ' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime,
-                    $results['info']['http_code'],
-                    $results['info']['redirect_count'],
-                    $results['info']['redirect_url'],
-                    $results['info']['redirect_time'],
-                  );
-            $log .= "> [{$time}] > [HTTP response code - redirect] > [{$results['info']['http_code']}]\r\n";
-            // continue;
-        }
+        $prev_res_exectime = $exectime;
         if(@!$results['status'] && ! empty($results['error'])){
             printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-                        "| [%d] | [%d/%d] ".
-                        "| [%s] ".
-                        "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                        "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                        "| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-                        ' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime, $results['info']['http_code']
+                        " [%d] [%d/%d] ".
+                        " [".COLOR_RED."%d".COLOR_RESET."]%-7s ".
+                        " [".COLOR_RED."%s".COLOR_RESET."]%-4s ".
+                        " [".COLOR_RED."%d".COLOR_RESET."]%-2s ".
+                        " [%s]\r\n".
+                        "%-{$indent_len}s [".COLOR_RED."%s".COLOR_RESET."]\r\n",
+                        ' ',
+                        count($crawled), $key, $hrefs_total,
+                        0, ' ', 
+                        $exectime, ' ',
+                        $results['info']['http_code'], ' ',
+                        $url,
+                        ' ',
+                        $results['error'],
                   );
             $log .= "> [{$time}] > {$results['error']}\r\n";
             continue;
-        }
+        }       
+
+
         // re-send request if 403
         if($results['info']['http_code'] === 403){
+            printf("%10s [%d] [%d/%d] ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                        " [%s]\r\n",
+                        ' ',
+                        count($crawled), $key, $hrefs_total,
+                        0, ' ',// res_size
+                        0, ' ',// exectime
+                        0, ' ',// http_code
+                        $url,
+                  );
             for($i = 1; $i <= MAX_RETRY_CONN_NUM; $i++){
-                printf(">%8s | [%d] | [%d/%d] ".
-                            "| [%s] ".
-                            "| [".COLOR_YELLOW."HTTP response status 403, re-send attempt: [{$i}/".MAX_RETRY_CONN_NUM."]".COLOR_RESET."]\r\n",
-                            ' ', count($crawled), $key, $hrefs_total, $url
-                      );
+                printf("%-{$indent_len}s [".COLOR_YELLOW."HTTP response status 403, re-send attempt: [{$i}/".MAX_RETRY_CONN_NUM."]".COLOR_RESET."]\r\n", ' ');
                 $results = exec_curl_request($scheme, $url, $prox_opt);
                 if(@!$results['status'] && ! empty($results['error'])){
                     $log .= "> [{$time}] > {$results['error']} > attempts: [{$i}/".MAX_RETRY_CONN_NUM."]\r\n";
                     printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-                            "| [%d] | [%d/%d] ".
-                            "| [%s] ".
-                            "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                            "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                            "| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-                            ' ', count($crawled), $key, $hrefs_total, $url, $results['error'], $exectime, $results['info']['http_code']
+                            " [%d] [%d/%d] ".
+                            " [".COLOR_RED."%d".COLOR_RESET."]%-8s ".
+                            " [".COLOR_RED."%s".COLOR_RESET."] ".
+                            " [".COLOR_RED."%d".COLOR_RESET."] ".
+                            " [%s]\r\n".
+                            "%-{$indent_len}s [".COLOR_RED."%s".COLOR_RESET."]\r\n",
+                            ' ',
+                            count($crawled), $key, $hrefs_total,
+                            0, ' ', // 0 = request size
+                            $exectime,
+                            $results['info']['http_code'],
+                            $url,
+                            ' ',
+                            $results['error'],
                           );
                 }
                 if($results['info']['http_code'] !== 403){
@@ -425,12 +453,20 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         if($results['info']['http_code'] >= 400){
             $errmsg = "HTTP error response code";
             printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
-                    "| [%d] | [%d/%d] ".
-                    "| [%s] ".
-                    "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                    "| [".COLOR_RED."%s".COLOR_RESET."] ".
-                    "| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
-                    ' ', count($crawled), $key, $hrefs_total, $url, $errmsg, $exectime, $results['info']['http_code']
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_RED."%d".COLOR_RESET."]%-8s".
+                    " [".COLOR_RED."%s".COLOR_RESET."] ".
+                    " [".COLOR_RED."%d".COLOR_RESET."] ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_RED."%s".COLOR_RESET."]\r\n",
+                    ' ',
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',
+                    $exectime,
+                    $results['info']['http_code'],
+                    $url,
+                    ' ',
+                    $errmsg, 
                   );
             $log .= "> [{$time}] > [{$errmsg}] > [{$results['info']['http_code']}]\r\n";
             continue;
@@ -438,6 +474,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 
         $crawled[] = $url;
         $res_size = format_file_size_to_str($results['info']['size_download']);
+        $prev_res_size = $res_size;
         $log .= "> [{$time}] > URL: [{$url}]\r\n".
                 sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n",
                             $results['host'],
@@ -450,40 +487,36 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                 sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size);
         file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
         $log = "";
-            
-        $doc = new DOMDocument();
-        @$doc->loadHTML($results['page']);
-
         $res_elements = get_response_elements($results['info']['http_code']);
-
+        $prev_res_http_code = $results['info']['http_code'];
         printf(
-            "> {$res_elements['color']}{$res_elements['response']}".COLOR_RESET.
+            "> {$res_elements['color']}%s".COLOR_RESET.
             ($results['info']['http_code'] === 200 ? "%s " : "%3s").
-            "| [%d] | [%d/%d] ".
-            "| [%s] ".
-            "| [{$res_elements['color']}%s".COLOR_RESET."] ".
-            "| [{$res_elements['color']}%s".COLOR_RESET."] ".
-            "| [{$res_elements['color']}%d".COLOR_RESET."]\r\n",
+            " [%d] [%d/%d] ".
+            " [{$res_elements['color']}%s".COLOR_RESET."]%-".(8 - strlen($res_size))."s ".
+            " [{$res_elements['color']}%s".COLOR_RESET."] ".
+            " [{$res_elements['color']}%d".COLOR_RESET."] ".
+            " [%s]\r\n",
+            $res_elements['response'],
             $res_elements['indent'],
             count($crawled) -1,
             $key, $hrefs_total,
-            $url,
-            $res_size,
+            $res_size, ' ',
             $exectime,
-            $results['info']['http_code']
+            $results['info']['http_code'],
+            $url,
         );
-        
-        $hrefs [TAGS['a'].$key] = extract_html_elements($doc,TAGS['a'],$url);        
-        $lists [TAGS['li'].$key] = extract_html_elements($doc,TAGS['li'],$url);
-        $imgs [TAGS['img'].$key] = extract_html_elements($doc,TAGS['img'],$url);
-        $links [TAGS['link'].$key] = extract_html_elements($doc,TAGS['link'],$url);
-        $metas [TAGS['meta'].$key] = extract_html_elements($doc,TAGS['meta'],$url);
-        $forms [TAGS['form'].$key] = extract_html_elements($doc,TAGS['form'],$url);
-        $tables [TAGS['table'].$key] = extract_html_elements($doc,TAGS['table'],$url);
-        $scripts [TAGS['script'].$key] = extract_html_elements($doc,TAGS['script'],$url);
+
+        $collected_elements = [];
+        $doc = new DOMDocument();
+        @$doc->loadHTML($results['page']);
+        foreach(TAGS as $tag){
+            $collected_elements["{$tag}.{$key}"] = extract_html_elements($doc,$tag,$url);
+        }
+        $all_elements[$url] = $collected_elements;
     }
 
-    $json = json_encode([$links,$metas,$imgs,$scripts,$hrefs,$forms,$lists,$tables]);
+    $collected_json = json_encode($all_elements);
     $app_time = microtime(true) - $app_start;
     $app_exectime = get_exec_time($app_time);
     printf("\r\n> Exec time: %s\r\n", $app_exectime);
@@ -494,7 +527,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                 "\r\n> s -save [JSON file size: %s]".
                 "\r\n> j -fetch elements by type".
                 "\r\n> r -return\r\n",
-                format_file_size_to_str(strlen($json))
+                format_file_size_to_str(strlen($collected_json))
               );
 
         $resultsdir = "{$target_dir}/results";
@@ -541,13 +574,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                 break;
 
             case 's':
-                file_put_contents("{$resultsdir}/results.json", $json);
+                file_put_contents("{$resultsdir}/results.json", $collected_json);
                 printf("> ".COLOR_GREEN."Saved".COLOR_RESET." > File path: [%s/results.json]".COLOR_RESET."\r\n", $resultsdir);
                 printf("\r\n");
                 break;
 
             case 'p':
-                print_r(json_decode($json));
+                recursive_read_elements($all_elements);
                 printf("\r\n");    
                 break;
 
@@ -689,7 +722,6 @@ function select_opts(string $scheme, string $url, int $prox_opt, string $args = 
 }
 
 function validate_base_domain(string $base_domain, string $link_domain, string $scheme) : bool {
-    // add "http(s)://" to url if not present
     if(substr($link_domain, 0, 7) !== "{$scheme}://"){
         $link_abs = "{$scheme}://$link_domain";
     } else {
@@ -704,22 +736,21 @@ function validate_base_domain(string $base_domain, string $link_domain, string $
     $parsed_link = parse_url($link_abs);
     $parsed_base = parse_url($base_abs);
     
-    // if host ip
     if(filter_var($parsed_link['host'], FILTER_VALIDATE_IP) !== false
     && filter_var($parsed_base['host'], FILTER_VALIDATE_IP) !== false)
     {
         // format: {ip_addr}:{port}
-        $default_http_port = 80;
+        $http_port = 80;
         $link_ip_port = ( ! empty($parsed_link['port']))
                         ? "{$scheme}://{$parsed_link['host']}:{$parsed_link['port']}"
-                        : "{$scheme}://{$parsed_link['host']}:{$default_http_port}";
+                        : "{$scheme}://{$parsed_link['host']}:{$http_port}";
         $base_ip_port = ( ! empty($parsed_base['port']))
                         ? "{$scheme}://{$parsed_base['host']}:{$parsed_base['port']}"
-                        : "{$scheme}://{$parsed_base['host']}:{$default_http_port}";
+                        : "{$scheme}://{$parsed_base['host']}:{$http_port}";
 
         return ($base_ip_port === $link_ip_port);
 
-    } else { // default host domain
+    } else {
         // format: {top_domain}.{extension}
         $link_domain = parse_url($link_domain);
         if(substr($base_domain, 0, 4) === "www."){
@@ -728,16 +759,17 @@ function validate_base_domain(string $base_domain, string $link_domain, string $
         if(substr($link_domain['host'], 0, 4) === "www."){
             $link_domain['host'] = substr($link_domain['host'], 4);
         }
-        $base_subdomain_by_levels = explode(".", $base_domain);
-        $link_subdomain_by_levels = explode(".", $link_domain['host']);
 
-        $base_index = count($base_subdomain_by_levels) -1;
-        $base_top_domain = "{$base_subdomain_by_levels[$base_index]}.{$base_subdomain_by_levels[$base_index -1]}";
+        $b_sub_lvls = explode(".", $base_domain);
+        $l_sub_lvls = explode(".", $link_domain['host']);
 
-        $link_index = count($link_subdomain_by_levels) -1;
-        $link_top_domain = "{$link_subdomain_by_levels[$link_index]}.{$link_subdomain_by_levels[$link_index -1]}";
+        $b_index = count($b_sub_lvls) -1;
+        $l_index = count($l_sub_lvls) -1;
 
-        return ($base_top_domain === $link_top_domain); 
+        $b_top_domain = "{$b_sub_lvls[$b_index]}.{$b_sub_lvls[$b_index -1]}";
+        $l_top_domain = "{$l_sub_lvls[$l_index]}.{$l_sub_lvls[$l_index -1]}";
+
+        return ($b_top_domain === $l_top_domain); 
     }
 }
 
@@ -752,48 +784,18 @@ function extract_html_elements(object $doc, string $tag, string $url) : array {
         'node_url' => $url,
         'node_elements' => [],
     ];
-    if($tag === 'a'){
-        foreach ($eles as $key => $a) {
-            $_element_elements = [];
-            recursive_loop_child_elements($a, $_element_elements);
-            if(! empty($_element_elements)){
-                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
-            }
-        }
-    } else if($tag === 'form'){
-        foreach ($eles as $key => $form){
-            $_element_elements = [];
-            recursive_loop_child_elements($form, $_element_elements);
-            if(! empty($_element_elements)){
-                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
-            }
-        }
-    } else if($tag === 'li'){
-        foreach ($eles as $key => $li){
-            $_element_elements = [];
-            recursive_loop_child_elements($li, $_element_elements);
-            if(! empty($_element_elements)){
-                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
-            }
-        }
-    } else if($tag === 'table'){
-        foreach ($eles as $key => $table){
-            $_element_elements = [];
-            recursive_loop_child_elements($table, $_element_elements);
-            if(! empty($_element_elements)){
-                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
-            }
-        }
-    } else {
-        foreach ($eles as $key => $ele){
-            $_element_elements = [];
-            recursive_loop_child_elements($ele, $_element_elements);
-            if(! empty($_element_elements)){
-                $elements['node_elements']["{$node_element}-{$key}"] = $_element_elements;
-            }
+    loop_elements($eles, $elements);
+    return $elements;
+}
+
+function loop_elements($loopable, array &$elements) : void {
+    foreach ($loopable as $key => $el){
+        $_elements = [];
+        recursive_loop_child_elements($el, $_elements);
+        if( ! empty($_elements)){
+            $elements['node_elements']["{$elements['node']}-{$key}"] = $_elements;
         }
     }
-    return $elements;
 }
 
 function set_user_agent() : string {
@@ -857,19 +859,17 @@ function fetch_html_elements_by_type($elements, string $filter_element) : array 
 
 function recursive_loop_child_elements($element, &$el_elements) : void {
     if(is_iterable($element)){
+        // TODO:: fix counter
         $cnt = 0;
         foreach ($element as $key => $el) {
             if( ! empty($el->attributes)){
                 foreach ($el->attributes as $attr){
                     if( ! empty($attr->nodeValue)){
+                        $val = trim(str_replace("\n", " ", $attr->nodeValue));
                         if(in_array($el->nodeName, TAGS)){
-                            $el_elements[
-                                "{$el->nodeName}"
-                            ] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+                            $el_elements[$el->nodeName][$attr->nodeName] = $val;
                         } else {
-                            $el_elements[
-                                "{$el->nodeName}-{$cnt}"
-                            ] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+                            $el_elements["{$el->nodeName}-{$cnt}"][$attr->nodeName] = $val;
                         }
                     }
                 }
@@ -884,14 +884,11 @@ function recursive_loop_child_elements($element, &$el_elements) : void {
             $cnt = 0;
             foreach ($element->attributes as $attr){
                 if( ! empty($attr->nodeValue)){
+                    $val = trim(str_replace("\n", " ", $attr->nodeValue));
                     if(in_array($element->nodeName, TAGS)){
-                        $el_elements[
-                            "{$element->nodeName}"
-                        ] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+                        $el_elements[$element->nodeName][$attr->nodeName] = $val;
                     } else {
-                        $el_elements[
-                            "{$element->nodeName}-{$cnt}"
-                        ] [$attr->nodeName] = trim(str_replace("\n", " ", $attr->nodeValue));
+                        $el_elements["{$element->nodeName}-{$cnt}"][$attr->nodeName] = $val;
                         $cnt++;
                     }
                 }
@@ -903,6 +900,7 @@ function recursive_loop_child_elements($element, &$el_elements) : void {
     }
 }
 
+// TODO:: fix recursion on whole result list
 function recursive_filter_elements($elements, &$data, string $filter_element) : void {
     foreach ($elements as $k => $el_vals) {
         if(is_iterable($el_vals) && ! empty($el_vals)){
