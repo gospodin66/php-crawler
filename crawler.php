@@ -1,5 +1,12 @@
 #!/usr/bin/php
 <?php
+/**
+ * TODOS:::
+ * 		- format code => many cases can be shortened
+ *  	- 
+ * 	 	-
+ * 	 	-
+ */
 if (PHP_SAPI !== 'cli') { die("Script needs to be run as cli.\r\n"); }
 $short = "p:s:x:a:m:";
 $long  = ["path:","scheme:","torprox:","args:","method:"];
@@ -49,12 +56,6 @@ define("COLOR_BLUE",COLOR_PREFIX."[34m");
 define("COLOR_LIGHT_BLUE",COLOR_PREFIX."[94m");
 define("COLOR_CYAN",COLOR_PREFIX."[36m");
 define("COLOR_WHITE",COLOR_PREFIX."[37m");
-if($prox_opt !== 1){ 
-	$prox_opt = 0;
-}
-$public_ip = get_public_ip($prox_opt);
-$parsed_url = parse_url("{$scheme}://{$domain}");
-
 if( ! defined('DATA_DIR')){
 	define("DATA_DIR", "scrapped/");
 }
@@ -62,6 +63,14 @@ if( ! file_exists(DATA_DIR)){
 	mkdir(DATA_DIR);
 }
 
+if($prox_opt !== 1){ 
+	$prox_opt = 0;
+}
+$public_ip = get_public_ip($prox_opt);
+$parsed_url = parse_url("{$scheme}://{$domain}");
+$target_dir = DATA_DIR.str_replace("/", "-", $parsed_url['host']);
+create_entity_dir($target_dir);
+create_entity_dir("{$target_dir}/results");
 $log = "";
 $curl_start = microtime(true);
 $results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
@@ -117,10 +126,10 @@ $calc_up_speed = format_file_size($up_numeric);
 
 $log .= "> Public IP: [".trim($public_ip)."]\r\n".
 	    "> [$_time] > URL: ".$domain."\r\n".
-	    "> [$_time] > Host: {$results['host']} | down/up speed: {$calc_down_speed}/{$calc_up_speed}\r\n".
+	    sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n", $results['host'], $calc_down_speed, $calc_up_speed).
 	    sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n", $page_size).
 	    sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size).
-		"> Res code:  [{$results['info']['http_code']}]";
+	    sprintf("\t\t\t\t\t\t> Response code: [%d]\r\n", $results['info']['http_code']);
 
 printf("> Public IP: [".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
 	   "> Page size: [".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
@@ -130,7 +139,7 @@ printf("> Public IP: [".COLOR_CYAN."%s".COLOR_RESET."]\r\n".
 	   trim($public_ip), $page_size, ' ', $res_size, ' ', $results['info']['http_code'], ' ', $exectime
 	  );
 
-file_put_contents(DATA_DIR.str_replace("/", "-", $parsed_url['host']).".txt", $log, FILE_APPEND);
+file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 $log = "";
 
 $doc = new DOMDocument();
@@ -153,7 +162,7 @@ $json = json_encode($main_request_results);
 
 print "\r\n> Successfuly scrapped the main webpage\r\n";
 while(1){
-	$jpath = DATA_DIR.str_replace("/", "-", $parsed_url['host']).".json";
+	$jpath = "{$target_dir}/results/main_scrap.json";
 	print "\r\n> Options:".
 			"\r\n> p -print main webpage results".
 			"\r\n> s -save main webpage results".
@@ -211,7 +220,7 @@ while(1){
 			} else {
 				$fmt_url = $parsed_url['host'];
 			}
-			follow_links($opts,$doc,$fmt_url,$scheme,$prox_opt);
+			follow_links($opts,$doc,$fmt_url,$scheme,$prox_opt,$target_dir);
 			break;
 
 		case 'e':
@@ -228,7 +237,20 @@ exit(0);
 
 /******************************************************************************/
 
-function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt){
+
+function create_entity_dir(string $target_dir) : bool {
+	if( ! file_exists($target_dir)){
+		if( ! mkdir($target_dir, 0755, true)){
+			printf("> Error creating target dir: %s\r\n", $target_dir);
+			return false;
+		}
+		printf("> Target dir created: %s\r\n", $target_dir);
+		return true;
+	}
+	return true;
+}
+
+function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir){
 	
 	$href_links = $doc->getElementsByTagName('a');
 	$url_regex = "/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\/\S*)?/";
@@ -236,10 +258,12 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
     $cnt = 0;
 	$app_start = microtime(true);
 
+	create_entity_dir("{$target_dir}/links");
+
 	foreach ($href_links as $key => $a)
 	{	
-		$url = trim($a->getAttribute('href'));
 		$log = "";
+		$url = trim($a->getAttribute('href'));
 		$time = date("Y-m-d H:i:s");
 
 		// skip empty | broken
@@ -251,10 +275,11 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 					count($crawled), $url
 				  );
 			$log .= "> [{$time}] > Warning | [Empty/broken path] > [{$url}]\r\n";
+			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;	
 		}
 		// do not download content!
-		else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)/", $url, $matches)) {
+		else if(preg_match("/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]$|\.jp(e{0,1})g$|(\.png$)|(\.pdf$)|(\.doc(x){0,1}$)|(\.odt$)/", $url, $matches)) {
 			$remote_filesize = exec_remote_filesize_request($url);
 			$remote_filesize_final = format_file_size($remote_filesize);
 			printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
@@ -264,10 +289,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 						"> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
 						"> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
 						count($crawled), $url, $remote_filesize_final, $matches[0]
-					);
-			$log .= "> [{$time}] > Warning | [Content URL > [{$remote_filesize_final}] > [{$url}] > ] \r\n";
-			file_put_contents(DATA_DIR."content_".str_replace("/", "-", $domain).".txt", $url."\r\n", FILE_APPEND);
-			file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
+				  );
+			$log .= "> [{$time}] > Warning | [Content URL > [{$remote_filesize_final}] > [{$url}]]\r\n";
+			file_put_contents("{$target_dir}/results/content.txt", "{$url}\r\n", FILE_APPEND);
+			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
 		}
 		// do not exec .js | javascript url | .php | .py
@@ -279,6 +304,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 						count($crawled), $url, $matches[0]
 					);
 			$log .= "> [{$time}] > Warning | [Script format: {$matches[0]}] > [{$url}]\r\n";
+			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
 		}
 		// skip mailto: | tel:
@@ -290,37 +316,34 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 						count($crawled), $url
 					);
 			$log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
+			file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 			continue;
 		}
 
-		$log .= "> [{$time}] > URL: [{$url}]\r\n";
-
 		// invalid url format => craft new
-		if(preg_match($url_regex, $url) === 0){ 
-			// print "> rel-path[".COLOR_CYAN."{$url}".COLOR_RESET."] ";
-			if($url[0] === "/" && substr($url, 0, 2) !== "//"){
+		if(preg_match($url_regex, $url) === 0) {
+			// save rel links before adaptation
+			file_put_contents("{$target_dir}/links/rel.txt", "{$url}\r\n", FILE_APPEND);
+			if($url[0] === "/" && substr($url, 0, 2) !== "//") {
 				$url = "{$scheme}://{$domain}{$url}";
 			}
 			// TODO: test case
-			else if(substr($url, 0, 2) === "./"){
+			else if(substr($url, 0, 2) === "./") {
 				$url = "{$scheme}://{$domain}/".basename($url);
 				var_dump("CASE TEST ./ ->", $url);
 			}
 			// TODO: test case
-			else if(substr($url, 0, 3) === "../"){
+			else if(substr($url, 0, 3) === "../") {
 				$url = "{$scheme}://{$domain}/".realpath($url)."/".basename($url);
 				var_dump("CASE TEST ../ ->", $url);
 			}
 			else {
 				$url = "{$scheme}://{$domain}/{$url}";
 			}
-			// save rel links
-			file_put_contents(DATA_DIR."rel_".str_replace("/", "-", $domain).".txt", $url."\r\n", FILE_APPEND);
 		}
 		// default abs url format
 		else {
-			// save abs links
-			file_put_contents(DATA_DIR."abs_".str_replace("/", "-", $domain).".txt", $url."\r\n", FILE_APPEND);
+			file_put_contents("{$target_dir}/links/abs.txt", "{$url}\r\n", FILE_APPEND);
 		}
 
 
@@ -328,13 +351,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 			continue;  
 		}
 		if( ! validate_base_domain($domain,$url,$scheme)){
-			$log .= "> [{$time}] > Invalid base domain [{$url}]\r\n";
 			printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
 						"| [%d] ".
 						"| [%s] ".
 						"| [".COLOR_RED."Invalid base domain".COLOR_RESET."]\r\n",
 						' ', count($crawled), $url
-					);
+				  );
+			$log .= "> [{$time}] > Invalid base domain [{$url}]\r\n";
 			continue;
 		}
 
@@ -344,9 +367,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		$curl_time = microtime(true) - $curl_start;
 		$exectime = get_exec_time($curl_time);
 
-
-		if( ! empty($results['info']['redirect_url']))
-		{
+		if( ! empty($results['info']['redirect_url'])){
 			printf("> ".COLOR_YELLOW."Redir".COLOR_RESET."%3s".
 					"| [%d] ".
 					"| [%s] ".
@@ -361,10 +382,10 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 					$results['info']['redirect_url'],
 					$results['info']['redirect_time'],
 				  );
+			$log .= "> [{$time}] > [HTTP response code - redirect] > [{$results['info']['http_code']}]\r\n";
 		}
 
 		if(@!$results['status'] && ! empty($results['error'])){
-			$log .= "> [{$time}] > {$results['error']}\r\n";
 			printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
 						"| [%d] ".
 						"| [%s] ".
@@ -372,7 +393,8 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 						"| [".COLOR_RED."%s".COLOR_RESET."] ".
 						"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
 						' ', count($crawled), $url, $results['error'], $exectime, $results['info']['http_code']
-					);
+				  );
+			$log .= "> [{$time}] > {$results['error']}\r\n";
 			continue;
 		}
 		// retry 5 times if 403
@@ -380,11 +402,12 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 			for($i = 0; $i < 5; $i++){
 				printf(">%8s | [%d] ".
 							"| [%s] ".
-							"| [".COLOR_YELLOW."HTTP response status 403, re-sending request [{$i}]".COLOR_RESET."]\r\n",
+							"| [".COLOR_YELLOW."HTTP response status 403, re-send attempts: [{$i}/5]".COLOR_RESET."]\r\n",
 							' ', count($crawled), $url
-						);
+					  );
 				$results = exec_curl_request($scheme, $url, $prox_opt);
 				if(@!$results['status'] && ! empty($results['error'])){
+					$log .= "> [{$time}] > {$results['error']} > attempts: [{$i}/5]\r\n";
 					printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
 							"| [%d] ".
 							"| [%s] ".
@@ -408,7 +431,8 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 					"| [".COLOR_RED."%s".COLOR_RESET."] ".
 					"| [".COLOR_RED."%d".COLOR_RESET."]\r\n",
 					' ', count($crawled), $url, $errmsg, $exectime, $results['info']['http_code']
-					);
+				  );
+			$log .= "> [{$time}] > [{$errmsg}] > [{$results['info']['http_code']}]\r\n";
 			continue;
 		}
 
@@ -422,10 +446,11 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		$res_size = format_file_size($results['info']['size_download']);
 		$page_size = format_file_size(strlen($results['page']));
 
-		$log .= "> [{$time}] > Host: {$results['host']} | down/up speed: {$calc_down_speed}/{$calc_up_speed}\r\n".
+		$log .= "> [{$time}] > URL: [{$url}]\r\n".
+				sprintf("\t\t\t\t\t\t> Host: %s | down/up speed: %s/%s\r\n", $results['host'], $calc_down_speed, $calc_up_speed).
 				sprintf("\t\t\t\t\t\t> Page size: [%s]\r\n", $page_size).
 				sprintf("\t\t\t\t\t\t> Len: [%s]\r\n", $res_size);
-		file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".txt", $log, FILE_APPEND);
+		file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
 		$log = "";
 			
 		$doc = new DOMDocument();
@@ -465,6 +490,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 		$tables [TAGS['table'].$key] = extract_html_elements($doc,TAGS['table'],$url);
 		$scripts [TAGS['script'].$key] = extract_html_elements($doc,TAGS['script'],$url);
     }
+
 	$json = json_encode([$links,$metas,$imgs,$scripts,$hrefs,$forms,$lists,$tables]);
 	$app_time = microtime(true) - $app_start;
 	$app_exectime = get_exec_time($app_time);
@@ -478,6 +504,9 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
 				"\r\n> r -return\r\n",
 				format_file_size(strlen($json))
 			  );
+
+		$resultsdir = "{$target_dir}/results";
+
 		switch (readline("> "))
 		{
 			case 'r':
@@ -510,18 +539,18 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                         $filter_el = 'a';
                         break;
                 }
-				$eles = read_json(__DIR__."/".DATA_DIR.$domain.".json");
-                printf("> JSON file read successfuly\r\n");
+				$eles = read_json("{$resultsdir}/results.json");
+                printf("> JSON file read successfuly > [{$resultsdir}/results.json]\r\n", $target_dir);
                 $eles_by_type = fetch_html_elements_by_type($eles, $filter_el);
-                if(file_put_contents(__DIR__."/".DATA_DIR.$domain.".filtered.json", json_encode($eles_by_type)) !== false){
-                    print("> Fitered elements saved to file successfuly\r\n");
+                if(file_put_contents("{$resultsdir}/results_filtered.json", json_encode($eles_by_type)) !== false){
+                    printf("> Fitered elements saved to file successfuly > [%s/results_filtered.json]\r\n", $resultsdir);
                 }
 				recursive_read_elements($eles_by_type);
                 break;
 
 			case 's':
-				file_put_contents(DATA_DIR.str_replace("/", "-", $domain).".json", $json);
-				print("> ".COLOR_GREEN."Saved".COLOR_RESET." > File path: ".__DIR__."/".DATA_DIR.$domain.".json".COLOR_RESET."\r\n");
+				file_put_contents("{$resultsdir}/results.json", $json);
+				printf("> ".COLOR_GREEN."Saved".COLOR_RESET." > File path: [%s/results.json]".COLOR_RESET."\r\n", $resultsdir);
 				printf("\r\n");
 				break;
 
@@ -573,7 +602,14 @@ function get_exec_time(float $time) : string {
 	return sprintf("{$color}%.2f{$unit}".COLOR_RESET, $time);
 }
 
-function exec_curl_request(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
+function exec_curl_request(
+	string $scheme,
+	string $url,
+	int $prox_opt,
+	string $args = "",
+	string $method = ""
+) : array
+{
 	$ch = curl_init();
 	$opts = select_opts($scheme,$url,$prox_opt,$args,$method);
 	curl_setopt_array($ch, $opts);
@@ -583,7 +619,7 @@ function exec_curl_request(string $scheme, string $url, int $prox_opt, string $a
 	$host = "{$curlinfo['primary_ip']}:{$curlinfo['primary_port']}";
 	$speed = "{$curlinfo['speed_download']}/{$curlinfo['speed_upload']}";
 	if(curl_errno($ch)){
-		$error = "Crawler error: ".curl_error($ch);
+		$error = "Crawler cURL error: ".curl_error($ch);
 		curl_close($ch);
 		return [
 			'status' => false,
@@ -591,6 +627,10 @@ function exec_curl_request(string $scheme, string $url, int $prox_opt, string $a
 			'info' => $curlinfo,
 		];
 	}
+	// if($last_request){
+	// 	printf("\r\n> ".COLOR_CYAN."Closed cURL handle!".COLOR_RESET."\r\n");
+	// 	curl_close($ch);
+	// }
 	curl_close($ch);
 	return [
 		'page' => $page,
@@ -621,6 +661,9 @@ function select_opts(string $scheme, string $url, int $prox_opt, string $args = 
 		    'Cache-Control: no-cache',
 	    ]
 	];
+	if (defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')){
+		$opts += [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4];
+	}
 	if($prox_opt === 1){
 		$opts += [CURLOPT_PROXY => '127.0.0.1:9050'];
 		$opts += [CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME];
@@ -637,6 +680,7 @@ function select_opts(string $scheme, string $url, int $prox_opt, string $args = 
 			$opts += [CURLOPT_POST => 1];
 			$opts += [CURLOPT_POSTFIELDS => $args_arr];
 		} else {
+			$opts += [CURLOPT_HTTPGET => 1];
 			$opts[CURLOPT_URL] = $opts[CURLOPT_URL]."/?{$args}";
 		}
 	}
