@@ -13,3 +13,10 @@ $ php crawler.php -p example.com -s https (OPTIONAL ARGS >) -x 1 -a"param1=x&par
 - logging: <br/>
     - abs|rel links<br/>
     - initial-request-results|all-results (a|li|img|meta|link|form|table|script) > (.json)<br/>
+
+
+TODOs::<br/>
+  - fix recursive filter elements (on whole result) by html tag<br/>
+  - fix output alignment<br/>
+  - disable public IP check on argument<br/>
+  - format code (many cases can be shortened)<br/>
