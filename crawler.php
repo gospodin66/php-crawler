@@ -244,12 +244,16 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         $log = "";
         $url = trim($a->getAttribute('href'));
         $time = date("Y-m-d H:i:s");
+
+
         $indent_len = (24 + strlen($key)
                           + strlen($hrefs_total)
                           + strlen($prev_res_size)
                           + strlen($prev_res_exectime)
                           + strlen($prev_res_http_code)
                       );
+
+
         // skip empty | broken
         if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
             printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
@@ -638,14 +642,7 @@ function get_exec_time(float $time) : string {
     return sprintf("{$color}%.2f{$unit}".COLOR_RESET, $time);
 }
 
-function exec_curl_request(
-    string $scheme,
-    string $url,
-    int $prox_opt,
-    string $args = "",
-    string $method = ""
-) : array
-{
+function exec_curl_request(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
     $ch = curl_init();
     $opts = select_opts($scheme,$url,$prox_opt,$args,$method);
     curl_setopt_array($ch, $opts);
