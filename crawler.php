@@ -66,16 +66,16 @@ if( ! file_exists(DATA_DIR)){
 if($prox_opt !== 1){ 
     $prox_opt = 0;
 }
+$log = "";
 $public_ip = get_public_ip($prox_opt);
 $parsed_url = parse_url("{$scheme}://{$domain}");
 $target_dir = DATA_DIR.str_replace("/", "-", $parsed_url['host']);
 create_entity_dir($target_dir);
 create_entity_dir("{$target_dir}/results");
-$log = "";
+
 $curl_start = microtime(true);
 $results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
-$curl_time = microtime(true) - $curl_start;
-$exectime = get_exec_time($curl_time);
+$exectime = get_exec_time((microtime(true) - $curl_start));
 
 if(@!$results['status'] && ! empty($results['error'])){
     die("> Error: {$results['error']}\r\n> Exit\r\n");
@@ -99,7 +99,7 @@ $res_size = format_file_size_to_str($results['info']['size_download']);
 $page_size = format_file_size_to_str(strlen($results['page']));
 
 if($prox_opt === 1) {
-    $log .= "> Using tor SOCKS5 proxy\r\n";
+    $log .= "> Using Tor SOCKS5 proxy\r\n";
     printf("\r\n> Using Tor SOCKS5 proxy\r\n");
 }
 
@@ -225,177 +225,49 @@ function create_entity_dir(string $target_dir) : bool {
 }
 
 function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir){
-    $href_links = $doc->getElementsByTagName('a');
-    $crawled = [];
-    $cnt = 0;
-    $app_start = microtime(true);
-    $hrefs_total = count($href_links) -1;
+    // prev_res vars are used to calc indentation of next line
+    $prev_res_size = $prev_res_exectime = $prev_res_http_code = $cnt = 0;
+    $all_elements = $crawled = [];
     create_entity_dir("{$target_dir}/links");
-    $all_elements = [];
-    $prev_res_size = $prev_res_exectime = $prev_res_http_code = 0;
+
+    $href_links = $doc->getElementsByTagName('a');
+    $hrefs_total = count($href_links) -1;
+    $app_start = microtime(true);
+    
     foreach ($href_links as $key => $a) {
         $log = "";
         $url = trim($a->getAttribute('href'));
         $time = date("Y-m-d H:i:s");
 
-
-        $indent_len = (24 + strlen($key)
-                          + strlen($hrefs_total)
-                          + strlen($prev_res_size)
-                          + strlen($prev_res_exectime)
-                          + strlen($prev_res_http_code)
+        $init_indent = strlen($key) === 1 ? 23 : 24;
+        $indent_len = ($init_indent + strlen($key)
+                                    + strlen($hrefs_total)
+                                    + strlen($prev_res_size)
+                                    + strlen($prev_res_exectime)
+                                    + strlen($prev_res_http_code)
                       );
 
-
-        // skip empty | broken
-        if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
-            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                    " [%d] [%d/%d] ".
-                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                    " [%s]\r\n".
-                    "%-{$indent_len}s [".COLOR_YELLOW."Empty/broken path".COLOR_RESET."]\r\n",
-                    count($crawled), $key, $hrefs_total,
-                    0, ' ',// res_size
-                    0, ' ',// exectime
-                    0, ' ',// http_code
-                    $url,
-                    ' ',
-                  );
-            $log .= "> [{$time}] > Warning | [Empty/broken path] > [{$url}]\r\n";
-            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
-            continue;    
-        }
-        // do not download content!
-        else if(preg_match(CONTENT_REGEX, $url, $matches)) {
-            $remote_filesize = exec_remote_filesize_request($url);
-            $remote_filesize_final = format_file_size_to_str($remote_filesize);
-            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        " [%d] [%d/%d] ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                        " [%s]\r\n".
-                        "%-{$indent_len}s [".COLOR_YELLOW."Content URL ".COLOR_RESET.
-                        "> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
-                        "> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
-                        count($crawled), $key, $hrefs_total,
-                        0, ' ',// res_size
-                        0, ' ',// exectime
-                        0, ' ',// http_code
-                        $url,
-                        ' ',
-                        $remote_filesize_final,
-                        $matches[0],
-                  );
-            $log .= "> [{$time}] > Warning | [Content URL > [{$remote_filesize_final}] > [{$url}]]\r\n";
-            file_put_contents("{$target_dir}/results/content.txt", "{$url}\r\n", FILE_APPEND);
-            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        if( ! validate_url($url, $scheme, $domain, $key, $hrefs_total, $indent_len, $crawled, $target_dir)){
             continue;
         }
-        // do not exec scripts!
-        else if(preg_match(SCRIPT_REGEX, $url, $matches)) {
-            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        " [%d] [%d/%d] ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                        " [%s]\r\n".
-                        "%-{$indent_len}s [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
-                        count($crawled), $key, $hrefs_total,
-                        0, ' ',// res_size
-                        0, ' ',// exectime
-                        0, ' ',// http_code
-                        $url,
-                        ' ',
-                        $matches[0],
-                  );
-            $log .= "> [{$time}] > Warning | [Script format: {$matches[0]}] > [{$url}]\r\n";
-            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
-            continue;
-        }
-        // skip mailto: | tel:
-        else if(preg_match("/^(mailto:|tel:)/", $url)) {
-            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                        " [%d] [%d/%d] ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                        " [%s]\r\n".
-                        "%-{$indent_len}s [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
-                        count($crawled), $key, $hrefs_total,
-                        0, ' ',// res_size
-                        0, ' ',// exectime
-                        0, ' ',// http_code
-                        $url,
-                        ' ',
-                  );
-            $log .= "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
-            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
-            continue;
-        }
-
-        // invalid url format => adapt
-        if(preg_match(URL_REGEX, $url) === 0) {
-            // save rel links before adaptation
-            file_put_contents("{$target_dir}/links/rel.txt", "{$url}\r\n", FILE_APPEND);
-            if($url[0] === "/" && substr($url, 0, 2) !== "//") {
-                $url = "{$scheme}://{$domain}{$url}";
-            } else if(substr($url, 0, 2) === "./") {
-                // => example.com/./some/path = example.com/path
-                $url = "{$scheme}://{$domain}/".basename($url);
-            } else if(substr($url, 0, 3) === "../") {
-                // => example.com/../some/path = example.com/path
-                $url = "{$scheme}://{$domain}/".realpath($url).basename($url);
-            } else {
-                $url = "{$scheme}://{$domain}/{$url}";
-            }
-        } else { 
-            file_put_contents("{$target_dir}/links/abs.txt", "{$url}\r\n", FILE_APPEND);
-        }
-
-
-        if(in_array($url, $crawled)){
-            continue;  
-        }
-        if( ! validate_base_domain($domain,$url,$scheme)){
-            printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
-                " [%d] [%d/%d] ".
-                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                " [%s]\r\n".
-                "%-{$indent_len}s [".COLOR_YELLOW."Invalid base domain".COLOR_RESET."]\r\n",
-                count($crawled), $key, $hrefs_total,
-                0, ' ',// res_size
-                0, ' ',// exectime
-                0, ' ',// http_code
-                $url,
-                ' ',
-              );
-            $log .= "> [{$time}] > Invalid base domain [{$url}]\r\n";
-            continue;
-        }
-
 
         $curl_start = microtime(true);
         $results = exec_curl_request($scheme, $url, $prox_opt);
-        $curl_time = microtime(true) - $curl_start;
-        $exectime = get_exec_time($curl_time);
+        $exectime = get_exec_time(microtime(true) - $curl_start);
         $prev_res_exectime = $exectime;
+
         if(@!$results['status'] && ! empty($results['error'])){
             printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
                         " [%d] [%d/%d] ".
                         " [".COLOR_RED."%d".COLOR_RESET."]%-7s ".
-                        " [".COLOR_RED."%s".COLOR_RESET."]%-4s ".
+                        " [".COLOR_RED."%s".COLOR_RESET."]".
                         " [".COLOR_RED."%d".COLOR_RESET."]%-2s ".
                         " [%s]\r\n".
                         "%-{$indent_len}s [".COLOR_RED."%s".COLOR_RESET."]\r\n",
                         ' ',
                         count($crawled), $key, $hrefs_total,
                         0, ' ', 
-                        $exectime, ' ',
+                        $exectime,
                         $results['info']['http_code'], ' ',
                         $url,
                         ' ',
@@ -405,21 +277,9 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             continue;
         }       
 
-
-        // re-send request if 403
+        // re-send request if 403 => indent both as no results are returned
         if($results['info']['http_code'] === 403){
-            printf("%10s [%d] [%d/%d] ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
-                        " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
-                        " [%s]\r\n",
-                        ' ',
-                        count($crawled), $key, $hrefs_total,
-                        0, ' ',// res_size
-                        0, ' ',// exectime
-                        0, ' ',// http_code
-                        $url,
-                  );
+            printf("%-{$indent_len}s [%s]\r\n", ' ',  $url);
             for($i = 1; $i <= MAX_RETRY_CONN_NUM; $i++){
                 printf("%-{$indent_len}s [".COLOR_YELLOW."HTTP response status 403, re-send attempt: [{$i}/".MAX_RETRY_CONN_NUM."]".COLOR_RESET."]\r\n", ' ');
                 $results = exec_curl_request($scheme, $url, $prox_opt);
@@ -516,6 +376,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
     $collected_json = json_encode($all_elements);
     $app_time = microtime(true) - $app_start;
     $app_exectime = get_exec_time($app_time);
+
     printf("\r\n> Exec time: %s\r\n", $app_exectime);
     while(1)
     {
@@ -587,6 +448,147 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         } 
     }
     return;
+}
+/**
+ * &$url is passed by ref. => re-craft rel. url
+ */
+function validate_url(string &$url, string $scheme, string $domain, int $key, int $hrefs_total, int $indent_len, array $crawled, string $target_dir) : bool {
+    $log = '';
+    $abs_path = "{$target_dir}/links/abs.txt";
+    $rel_path = "{$target_dir}/links/rel.txt";
+    $time = date("Y-m-d H:i:s");
+
+    // skip empty | broken
+    if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
+        printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+                " [%d] [%d/%d] ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                " [%s]\r\n".
+                "%-{$indent_len}s [".COLOR_YELLOW."Empty/broken path".COLOR_RESET."]\r\n",
+                count($crawled), $key, $hrefs_total,
+                0, ' ',// res_size
+                0, ' ',// exectime
+                0, ' ',// http_code
+                $url,
+                ' ',
+                );
+        $log = "> [{$time}] > Warning | [Empty/broken path] > [{$url}]\r\n";
+        file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        return false;
+    }
+    // do not download content!
+    else if(preg_match(CONTENT_REGEX, $url, $matches)) {
+        $remote_filesize = format_file_size_to_str(exec_remote_filesize_request($url));
+        printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_YELLOW."Content URL ".COLOR_RESET.
+                    "> [".COLOR_YELLOW."%s".COLOR_RESET."] ".
+                    "> [".COLOR_YELLOW."%s".COLOR_RESET."]]\r\n",
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',// res_size
+                    0, ' ',// exectime
+                    0, ' ',// http_code
+                    $url,
+                    ' ',
+                    $remote_filesize,
+                    $matches[0],
+                );
+        $log = "> [{$time}] > Warning | [Content URL > [{$remote_filesize}] > [{$url}]]\r\n";
+        file_put_contents("{$target_dir}/results/content.txt", "{$url}\r\n", FILE_APPEND);
+        file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        return false;
+    }
+    // do not exec scripts!
+    else if(preg_match(SCRIPT_REGEX, $url, $matches)) {
+        printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_YELLOW."Script format: %s".COLOR_RESET."]\r\n",
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',// res_size
+                    0, ' ',// exectime
+                    0, ' ',// http_code
+                    $url,
+                    ' ',
+                    $matches[0],
+                );
+        $log = "> [{$time}] > Warning | [Script format: {$matches[0]}] > [{$url}]\r\n";
+        file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        return false;
+    }
+    // skip mailto: | tel:
+    else if(preg_match("/^(mailto:|tel:)/", $url)) {
+        printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+                    " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_YELLOW."Email/tel format".COLOR_RESET."]\r\n",
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',// res_size
+                    0, ' ',// exectime
+                    0, ' ',// http_code
+                    $url,
+                    ' ',
+                );
+        $log = "> [{$time}] > Warning | [Email/tel format] > [{$url}]\r\n";
+        file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        return false;
+    }
+
+    // invalid url format => adapt
+    if(preg_match(URL_REGEX, $url) === 0) {
+        // save rel links before adaptation
+        file_put_contents($rel_path, "{$url}\r\n", FILE_APPEND);
+        if($url[0] === "/" && substr($url, 0, 2) !== "//") {
+            $url = "{$scheme}://{$domain}{$url}";
+        } else if(substr($url, 0, 2) === "./") {
+            // => example.com/./some/path = example.com/path
+            $url = "{$scheme}://{$domain}/".basename($url);
+        } else if(substr($url, 0, 3) === "../") {
+            // => example.com/../some/path = example.com/path
+            $url = "{$scheme}://{$domain}/".realpath($url).basename($url);
+        } else {
+            $url = "{$scheme}://{$domain}/{$url}";
+        }
+    } else { 
+        file_put_contents($abs_path, "{$url}\r\n", FILE_APPEND);
+    }
+
+    if(in_array($url, $crawled)){
+        return false;  
+    }
+
+    if( ! validate_base_domain($domain,$url,$scheme)){
+        printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
+            " [%d] [%d/%d] ".
+            " [".COLOR_YELLOW."%d".COLOR_RESET."]%-7s ".
+            " [".COLOR_YELLOW."%d".COLOR_RESET."]%-4s ".
+            " [".COLOR_YELLOW."%d".COLOR_RESET."]%-2s ".
+            " [%s]\r\n".
+            "%-{$indent_len}s [".COLOR_YELLOW."Invalid base domain".COLOR_RESET."]\r\n",
+            count($crawled), $key, $hrefs_total,
+            0, ' ',// res_size
+            0, ' ',// exectime
+            0, ' ',// http_code
+            $url,
+            ' ',
+            );
+        $log = "> [{$time}] > Invalid base domain [{$url}]\r\n";
+        file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+        return false;
+    }
+    return true;
 }
 
 function get_response_elements(int $code) : array {
