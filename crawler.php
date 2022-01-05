@@ -274,9 +274,9 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                         $results['error'],
                   );
             $log .= "> [{$time}] > {$results['error']}\r\n";
+            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
             continue;
-        }       
-
+        }
         // re-send request if 403 => indent both as no results are returned
         if($results['info']['http_code'] === 403){
             printf("%-{$indent_len}s [%s]\r\n", ' ',  $url);
@@ -363,7 +363,29 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
             $results['info']['http_code'],
             $url,
         );
-
+        
+        if(empty($results['page'])){
+            $errmsg = "Empty page";
+            printf("> ".COLOR_RED."Error".COLOR_RESET."%3s".
+                    " [%d] [%d/%d] ".
+                    " [".COLOR_RED."%d".COLOR_RESET."]%-8s".
+                    " [".COLOR_RED."%s".COLOR_RESET."] ".
+                    " [".COLOR_RED."%d".COLOR_RESET."] ".
+                    " [%s]\r\n".
+                    "%-{$indent_len}s [".COLOR_RED."%s".COLOR_RESET."]\r\n",
+                    ' ',
+                    count($crawled), $key, $hrefs_total,
+                    0, ' ',
+                    $exectime,
+                    $results['info']['http_code'],
+                    $url,
+                    ' ',
+                    $errmsg, 
+                  );
+            $log .= "> [{$time}] > [{$errmsg}] > [{$results['info']['http_code']}]\r\n";
+            file_put_contents("{$target_dir}/log.txt", $log, FILE_APPEND);
+            continue;
+        }
         $collected_elements = [];
         $doc = new DOMDocument();
         @$doc->loadHTML($results['page']);
