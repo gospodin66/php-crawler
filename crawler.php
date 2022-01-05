@@ -1,12 +1,5 @@
 #!/usr/bin/php
 <?php
-/**
- * TODOS:::
- *         - format code => many cases can be shortened
- *      - 
- *          -
- *          -
- */
 if (PHP_SAPI !== 'cli') { die("Script needs to be run as cli.\r\n"); }
 $short = "p:s:x:a:m:";
 $long  = ["path:","scheme:","torprox:","args:","method:"];
