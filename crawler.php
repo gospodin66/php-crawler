@@ -37,8 +37,8 @@ $prox_opt = (count($opts) >= 3) ? (array_key_exists("torprox", $opts) ? intval(t
 if($prox_opt !== 1){ 
     $prox_opt = 0;
 }
-if($prox_opt === 1 && ! extension_loaded('tor')) {
-    die("Optional argument proxy uses tor extension.\r\n");
+if($prox_opt === 1 && !tor_running()) {
+    die("Optional argument proxy needs tor service running.\r\n");
 }
 if($prox_opt === 1) {
     $log .= "> Using Tor SOCKS5 proxy\r\n";
@@ -238,7 +238,19 @@ while(1){
 printf(COLOR_GREEN."> Finished".COLOR_RESET."\r\n");
 exit(0);
 
+
+
+
 /******************************************************************************/
+
+function tor_running() : bool {
+    //Get all running processes and search for "tor" within them
+    //The "[" and "]" are used to execlude ps and grep from the returned result.
+    $CLIResult = exec('ps aux | grep -w [t]or'); 
+    //If no processes was found(= Tor is not running..)
+    return !empty($CLIResult);
+}
+
 
 function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir) : void {
     // prev_res vars are used to calc indentation of next line
