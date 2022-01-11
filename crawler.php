@@ -1,9 +1,20 @@
 #!/usr/bin/php
 <?php
-if (PHP_SAPI !== 'cli') { die("Script needs to be run as cli.\r\n"); }
+if (PHP_SAPI !== 'cli') { 
+    die("Script needs to be ran in cli environment.\r\n");
+}
+if( ! extension_loaded('curl')) {
+    die("Script uses curl extension - php{version}-curl.\r\n");
+}
+if( ! extension_loaded('xml')) {
+    die("Script uses xml extension - php{version}-xml.\r\n");
+}
+
 $short = "p:s:x:a:m:";
-$long  = ["path:","scheme:","torprox:","args:","method:"];
+$long = ["path:","scheme:","torprox:","args:","method:"];
 $opts = getopt($short,$long);
+$log = "";
+
 if(count($opts) < 2){ 
     die("> Assign [-p]--path <example.com> ".
                  "[-s]--scheme <http/s>".
@@ -12,24 +23,39 @@ if(count($opts) < 2){
                  "(optional) [-m]--method<GET|POST>\r\n"
        );
 }
-$domain = array_key_exists("path", $opts)   ? trim($opts['path'])   : trim($opts['p']);
+/**
+ * path  | scheme         => mandatory
+ * proxy | args  | method => optional
+ */
 $scheme = array_key_exists("scheme", $opts) ? trim($opts['scheme']) : trim($opts['s']);
+$domain = array_key_exists("path", $opts) ? trim($opts['path']) : trim($opts['p']);
 if(preg_match('/^((http|https)\:\/\/)/', $domain)){
     $domain = preg_replace('/^((http|https)\:\/\/)/', '', $domain);
 }
-// prox_opt & args are optional
+// prox_opt
 $prox_opt = (count($opts) >= 3) ? (array_key_exists("torprox", $opts) ? intval(trim($opts['torprox'])) : intval(trim($opts['x']))) : 0;
+if($prox_opt !== 1){ 
+    $prox_opt = 0;
+}
+if($prox_opt === 1 && ! extension_loaded('tor')) {
+    die("Optional argument proxy uses tor extension.\r\n");
+}
+if($prox_opt === 1) {
+    $log .= "> Using Tor SOCKS5 proxy\r\n";
+    printf("\r\n> Using Tor SOCKS5 proxy\r\n");
+}
+// args
 $args = (count($opts) >= 4) ? (array_key_exists("args", $opts) ? trim($opts['args']) : trim($opts['a'])) : "";
-
+// method
 if(count($opts) === 5){
-    $method = array_key_exists("method", $opts) ? trim($opts['method']) : trim($opts['m']);
+    $method = array_key_exists("method", $opts) ? strtoupper(trim($opts['method'])) : strtoupper(trim($opts['m']));
     if($method !== "POST" && $method !== "GET"){
         $method = "GET";
         printf("> Switched to default request method: GET\r\n");
     }
-} else {
-    $method = "";
-}
+} else { $method = "GET"; }
+
+
 define("TAGS",[
     'a' => 'a',
     'li' => 'li',
@@ -56,22 +82,26 @@ define("CONTENT_REGEX", "/(\.(x{0,1})(apk$))|(\.ipa$)|\.mp{1}[(3{0,1})|(4{0,1})]
 define("SCRIPT_REGEX", "/(\.js$)|(\.php$)|(^javascript:)|(\.py$)|(\.asp(x){0,1}$)/");
 define("BROKEN_URL_REGEX", "/(^(\s)+$)|(^_blank)|(^[_|#])/");
 define("MAX_RETRY_CONN_NUM", 5);
+define("TOR_SOCKS5_ADDR", '127.0.0.1:9050');
+
 if( ! defined('DATA_DIR')){
     define("DATA_DIR", "scrapped/");
 }
 if( ! file_exists(DATA_DIR)){
-    mkdir(DATA_DIR);
+    if( ! mkdir(DATA_DIR, 0755, true)){
+		die(sprintf("> Error creating DATA DIR: [%s]\r\n", DATA_DIR));
+	}
 }
 
-if($prox_opt !== 1){ 
-    $prox_opt = 0;
-}
-$log = "";
 $public_ip = get_public_ip($prox_opt);
 $parsed_url = parse_url("{$scheme}://{$domain}");
 $target_dir = DATA_DIR.str_replace("/", "-", $parsed_url['host']);
+
 create_entity_dir($target_dir);
 create_entity_dir("{$target_dir}/results");
+
+$results_path = "{$target_dir}/results/main_scrap.json";
+$results_path_filtered = "{$target_dir}/results/main_scrap_filtered.json";
 
 $curl_start = microtime(true);
 $results = exec_curl_request($scheme, $domain, $prox_opt, $args, $method);
@@ -80,7 +110,6 @@ $exectime = get_exec_time((microtime(true) - $curl_start));
 if(@!$results['status'] && ! empty($results['error'])){
     die("> Error: {$results['error']}\r\n> Exit\r\n");
 }
-
 if($results['info']['http_code'] === 403){
     $retry_cnt = 0;
     while(readline('> HTTP response status 403, re-send request? (y/n): ') === 'y'){
@@ -95,13 +124,9 @@ if($results['info']['http_code'] === 403){
         }
     }
 }
+
 $res_size = format_file_size_to_str($results['info']['size_download']);
 $page_size = format_file_size_to_str(strlen($results['page']));
-
-if($prox_opt === 1) {
-    $log .= "> Using Tor SOCKS5 proxy\r\n";
-    printf("\r\n> Using Tor SOCKS5 proxy\r\n");
-}
 
 $log .= "> Public IP: [".trim($public_ip)."]\r\n".
         "> [".date("Y-m-d H:i:s")."] > URL: ".$domain."\r\n".
@@ -127,15 +152,19 @@ $log = "";
 
 $doc = new DOMDocument();
 @$doc->loadHTML($results['page']);
+
 $title = $doc->getElementsByTagName("title");
 @$title = $title->item(0)->nodeValue;
+
 $collected_elements = [];
 foreach(TAGS as $key => $tag){
     $collected_elements[] = extract_html_elements($doc,$tag,"{$scheme}://{$domain}");
 }
-print "\r\n> Successfuly scrapped the main webpage\r\n";
+
+
+
 while(1){
-    $jpath = "{$target_dir}/results/main_scrap.json";
+    $indent = 0; // used to indent child elements in recursive output
     print "\r\n> Options:".
             "\r\n> p -print main webpage results".
             "\r\n> s -save main webpage results".
@@ -144,7 +173,7 @@ while(1){
             "\r\n> e -exit\r\n";
     switch (readline("> ")) {
         case 'p':
-            recursive_read_elements($collected_elements);
+            recursive_read_elements($collected_elements, $indent);
             printf("\r\n");
             break;
 
@@ -175,16 +204,17 @@ while(1){
                     $filter_el = 'a';
                     break;
             }
-            $eles = read_json($jpath);
-            printf("> File [%s] read successfuly\r\n", $jpath);
             $eles_by_type = [];
-            recursive_filter_elements($eles, $eles_by_type, $filter_el);
-            recursive_read_elements($eles_by_type);
+            recursive_filter_main_elements(read_json($results_path), $eles_by_type, $filter_el);
+            if(file_put_contents($results_path_filtered, json_encode($eles_by_type)) !== false){
+                printf("> Fitered elements saved to file successfuly > [%s]\r\n", $results_path_filtered);
+            }
+            recursive_read_elements($eles_by_type, $indent);
             break;
 
         case 's':
-            file_put_contents($jpath, json_encode($collected_elements));
-            printf("\r\n> Successfuly saved file > [%s]\r\n", $jpath);
+            file_put_contents($results_path, json_encode($collected_elements));
+            printf("\r\n> Successfuly saved file > [%s]\r\n", $results_path);
             break;
             
         case 'f':
@@ -199,9 +229,9 @@ while(1){
         case 'e':
             break 2;
 
-         default:
+		default:
             print(COLOR_RED."> Invalid argument".COLOR_RESET."\r\n");
-             break;
+			break;
      } 
 }    
 // print "\x07"; // beep 
@@ -210,24 +240,11 @@ exit(0);
 
 /******************************************************************************/
 
-
-function create_entity_dir(string $target_dir) : bool {
-    if( ! file_exists($target_dir)){
-        if( ! mkdir($target_dir, 0755, true)){
-            printf("> Error creating target dir: [%s]\r\n", $target_dir);
-            return false;
-        }
-        printf("> Target dir created: [%s]\r\n", $target_dir);
-        return true;
-    }
-    printf("> Target dir already exists: [%s]\r\n", $target_dir);
-    return true;
-}
-
-function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir){
+function follow_links(array $opts, $doc, string $domain, string $scheme, int $prox_opt, string $target_dir) : void {
     // prev_res vars are used to calc indentation of next line
     $prev_res_size = $prev_res_exectime = $prev_res_http_code = $cnt = 0;
     $all_elements = $crawled = [];
+
     create_entity_dir("{$target_dir}/links");
 
     $href_links = $doc->getElementsByTagName('a');
@@ -238,13 +255,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         $log = "";
         $url = trim($a->getAttribute('href'));
         $time = date("Y-m-d H:i:s");
-
         $init_indent = strlen($key) === 1 ? 23 : 24;
-        $indent_len = ($init_indent + strlen($key)
-                                    + strlen($hrefs_total)
-                                    + strlen($prev_res_size)
-                                    + strlen($prev_res_exectime)
-                                    + strlen($prev_res_http_code)
+        $indent_len = ($init_indent
+                        + strlen($key)
+                        + strlen($hrefs_total)
+                        + strlen($prev_res_size)
+                        + strlen($prev_res_exectime)
+                        + strlen($prev_res_http_code)
                       );
 
         if( ! validate_url($url, $scheme, $domain, $key, $hrefs_total, $indent_len, $crawled, $target_dir)){
@@ -390,14 +407,13 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
         $doc = new DOMDocument();
         @$doc->loadHTML($results['page']);
         foreach(TAGS as $tag){
-            $collected_elements["{$tag}.{$key}"] = extract_html_elements($doc,$tag,$url);
+            $collected_elements[$tag] = extract_html_elements($doc,$tag,$url);
         }
         $all_elements[$url] = $collected_elements;
     }
 
     $collected_json = json_encode($all_elements);
-    $app_time = microtime(true) - $app_start;
-    $app_exectime = get_exec_time($app_time);
+    $app_exectime = get_exec_time(microtime(true) - $app_start);
 
     printf("\r\n> Exec time: %s\r\n", $app_exectime);
     while(1)
@@ -411,7 +427,7 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
               );
 
         $resultsdir = "{$target_dir}/results";
-
+        $indent = 0; // used to indent child elements in recursive output
         switch (readline("> "))
         {
             case 'r':
@@ -444,13 +460,15 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                         $filter_el = 'a';
                         break;
                 }
-                $eles = read_json("{$resultsdir}/results.json");
-                printf("> JSON file read successfuly > [{$resultsdir}/results.json]\r\n", $target_dir);
-                $eles_by_type = fetch_html_elements_by_type($eles, $filter_el);
-                if(file_put_contents("{$resultsdir}/results_filtered.json", json_encode($eles_by_type)) !== false){
+                $eles_by_type = [];                
+                recursive_filter_all_elements(read_json("{$resultsdir}/results.json"), $eles_by_type, $filter_el);
+				$unique_eles_by_type = filter_iterable_unique($eles_by_type);
+
+                if(file_put_contents("{$resultsdir}/results_filtered.json", json_encode($unique_eles_by_type)) !== false){
                     printf("> Fitered elements saved to file successfuly > [%s/results_filtered.json]\r\n", $resultsdir);
                 }
-                recursive_read_elements($eles_by_type);
+
+                recursive_read_elements($unique_eles_by_type, $indent);
                 break;
 
             case 's':
@@ -460,26 +478,26 @@ function follow_links(array $opts, $doc, string $domain, string $scheme, int $pr
                 break;
 
             case 'p':
-                recursive_read_elements($all_elements);
+                recursive_read_elements($all_elements, $indent);
                 printf("\r\n");    
                 break;
 
-             default:
-                 printf(COLOR_RED."> Invalid argument".COLOR_RESET."\r\n");
-                 break;
+            default:
+				printf(COLOR_RED."> Invalid argument".COLOR_RESET."\r\n");
+				break;
         } 
     }
     return;
 }
-/**
- * &$url is passed by ref. => re-craft rel. url
- */
+
 function validate_url(string &$url, string $scheme, string $domain, int $key, int $hrefs_total, int $indent_len, array $crawled, string $target_dir) : bool {
+	/**
+	 * &$url is passed by ref. => re-craft rel. url
+	 */
     $log = '';
     $abs_path = "{$target_dir}/links/abs.txt";
     $rel_path = "{$target_dir}/links/rel.txt";
     $time = date("Y-m-d H:i:s");
-
     // skip empty | broken
     if(empty($url) || preg_match(BROKEN_URL_REGEX, $url)) {
         printf("> ".COLOR_YELLOW."Warning ".COLOR_RESET.
@@ -574,6 +592,9 @@ function validate_url(string &$url, string $scheme, string $domain, int $key, in
         file_put_contents($rel_path, "{$url}\r\n", FILE_APPEND);
         if($url[0] === "/" && substr($url, 0, 2) !== "//") {
             $url = "{$scheme}://{$domain}{$url}";
+        } else if(substr($url, 0, 2) === "//") {
+            // => //some/path = example.com/path
+            $url = "{$scheme}://{$domain}/".basename($url);
         } else if(substr($url, 0, 2) === "./") {
             // => example.com/./some/path = example.com/path
             $url = "{$scheme}://{$domain}/".basename($url);
@@ -613,52 +634,6 @@ function validate_url(string &$url, string $scheme, string $domain, int $key, in
     return true;
 }
 
-function get_response_elements(int $code) : array {
-    return (($code >= 200 && $code < 300)
-           ? ['color' => COLOR_GREEN, 'response' => "Success", 'indent' => '',]
-           :(($code >= 300 && $code < 400)
-                ?['color' => COLOR_LIGHT_BLUE, 'response' => "Redir", 'indent' => ' ']
-                :['color' => COLOR_RED, 'response' => "Error", 'indent' => ' ']
-            )
-    );
-}
-
-function exec_remote_filesize_request(string $url) : float {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => 1,
-        CURLOPT_FOLLOWLOCATION => 1, // dont want the size of redir request
-        CURLOPT_HEADER => 1,
-        CURLOPT_NOBODY => 1,
-    ]);
-    $data = curl_exec($ch);
-    $size = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
-    curl_close($ch);
-    return round($size, 2);
-}
-
-function format_file_size_to_str(int $size) : string {
-    $size_str = (string)$size;
-    return strlen($size_str) > 6
-            ? sprintf("%.2fMb", ($size / 1000000))
-            : ((strlen($size_str) > 3 && strlen($size_str) < 7)
-                ? sprintf("%.2fkb", ($size / 1000))
-                : sprintf("%.2fb", $size)
-              );
-}
-
-function get_exec_time(float $time) : string {
-    $color = $time < 5 ? COLOR_GREEN :($time > 5 && $time < 10 ? COLOR_YELLOW : COLOR_RED);
-    if($time < 60){
-        $unit = "s";
-    } else {
-        // convert to mins => scaled to 100, not 60
-        $time = $time / 60;
-        $unit = "min";
-    }
-    return sprintf("{$color}%.2f{$unit}".COLOR_RESET, $time);
-}
-
 function exec_curl_request(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
     $ch = curl_init();
     $opts = select_opts($scheme,$url,$prox_opt,$args,$method);
@@ -689,7 +664,7 @@ function exec_curl_request(string $scheme, string $url, int $prox_opt, string $a
     ];
 }
 
-function select_opts(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "") : array {
+function select_opts(string $scheme, string $url, int $prox_opt, string $args = "", string $method = "GET") : array {
     $opts = [
         CURLOPT_URL             => preg_match('/^'.$scheme.'/', $url) ? $url : "{$scheme}://{$url}",
         CURLOPT_HEADER          => 1,
@@ -713,14 +688,14 @@ function select_opts(string $scheme, string $url, int $prox_opt, string $args = 
         $opts += [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4];
     }
     if($prox_opt === 1){
-        $opts += [CURLOPT_PROXY => '127.0.0.1:9050'];
+        $opts += [CURLOPT_PROXY => TOR_SOCKS5_ADDR];
         $opts += [CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME];
     }
     if( ! empty($args)){
         if( ! empty($method) && $method === "POST"){
+            // craft array of params from query string
             $args_temp_arr = explode("&",$args);
-            $args_temp = [];
-            $args_arr = [];
+            $args_temp = $args_arr = [];
             foreach ($args_temp_arr as $ak => $a) {
                 $args_temp = explode("=", $a);
                 $args_arr[$args_temp[0]] = $args_temp[1]; 
@@ -731,6 +706,10 @@ function select_opts(string $scheme, string $url, int $prox_opt, string $args = 
             $opts += [CURLOPT_HTTPGET => 1];
             $opts[CURLOPT_URL] = $opts[CURLOPT_URL]."/?{$args}";
         }
+    } else {
+        // no args -> "GET" as default method
+        $opts += [CURLOPT_HTTPGET => 1];
+        $opts[CURLOPT_URL] = $opts[CURLOPT_URL]."/?{$args}";
     }
     return $opts;
 }
@@ -802,14 +781,147 @@ function extract_html_elements(object $doc, string $tag, string $url) : array {
     return $elements;
 }
 
+function extract_text_from_html($dom_element) : array {
+    $new_dom = new DOMDocument;
+    // convert DOMElement to DOMDocument as DOMXpath accepts only DOMDocument as arg
+    $new_dom->appendChild($new_dom->importNode($dom_element, true));
+    $xpath = new DOMXpath($new_dom);
+    $texts = [];
+    foreach ($xpath->query('//text()', $new_dom) as $textNodeKey => $textNode) {
+        $v = trim(str_replace("\n", " ", $textNode->nodeValue));
+        if( ! empty($v) || preg_match_all("/^\s+$/", $v)){
+            $texts[] = $v;
+        }
+    }
+    return $texts;
+}
+
 function loop_elements($loopable, array &$elements) : void {
     foreach ($loopable as $key => $el){
         $_elements = [];
-        recursive_loop_child_elements($el, $_elements);
+        $counter = 0;
+        recursive_loop_child_elements($el, $_elements, $counter);
         if( ! empty($_elements)){
             $elements['node_elements']["{$elements['node']}-{$key}"] = $_elements;
         }
     }
+}
+
+function recursive_loop_child_elements($element, &$el_elements, &$counter) : void {
+    if(is_iterable($element)){
+        foreach ($element as $key => $el) {
+            extract_node_values($el, $el_elements, $counter);
+            if($el->hasChildNodes()){
+                recursive_loop_child_elements($el->childNodes, $el_elements, $counter);
+            }
+
+        }
+    } else {
+        extract_node_values($element, $el_elements, $counter);
+        if($element->hasChildNodes()){
+            recursive_loop_child_elements($element->childNodes, $el_elements, $counter);
+        }
+
+    }
+}
+
+function extract_node_values($element, &$el_elements, &$counter) : void {
+    $texts = extract_text_from_html($element);
+    if( ! empty($element->attributes)){
+        foreach ($element->attributes as $attr){
+            if( ! empty($attr->nodeValue)){
+                $el_elements["{$element->nodeName}-{$counter}"][$attr->nodeName] = [
+                    "val" => trim(str_replace("\n", " ", $attr->nodeValue)),
+                    "text" => $texts,
+                ];
+            }
+        }
+        $counter++;
+    }
+}
+
+function recursive_filter_main_elements($elements, &$data, string $filter_element) : void {
+    foreach ($elements as $k => $el_vals) {
+        if(empty($el_vals)){
+            continue;
+        }
+        $node_el = $el_vals->node_elements ?? null;
+        $node = $el_vals->node ?? null;
+        if(is_iterable($node_el)) {
+            recursive_filter_main_elements($node_el, $data, $filter_element);
+        }
+        else {
+            if($node === $filter_element){
+                foreach ($node_el as $node_el_key => $node_el_val) {
+                    $data[] = $node_el_val;
+                }
+            }
+        }
+    }
+}
+
+function recursive_filter_all_elements($elements, &$data, $filter_element) : void {
+    foreach ($elements as $k => $el_vals) {
+        foreach ($el_vals as $key => $el_node_elements) {
+            $node_el = $el_node_elements->node_elements ?? null;
+            $node = $el_node_elements->node ?? null;
+            if( ! empty($node) && ! empty($node_el)){
+                if(is_iterable($node_el)){
+                    recursive_filter_all_elements($node_el, $data, $filter_element);
+                }
+                else {
+                    if(substr($node, 0, strlen($filter_element)) === $filter_element){
+                        foreach ($node_el as $node_el_key => $node_el_val) {
+                            $data[] = $node_el_val;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function recursive_read_elements($elements, int &$indent) : void {
+    foreach ($elements as $key => $el) {
+        if(is_object($el) || is_array($el)) {
+            $indent++; // increment indent on every new call => has children
+            recursive_read_elements($el, $indent);
+        } else {
+            if($key === 'node' || $key === 'node_url'){
+                $color = COLOR_LIGHT_BLUE;
+                $k = str_replace('_', ' ', strtoupper($key));
+            } else {
+                $color = COLOR_WHITE;
+                $k = str_replace('_', ' ', $key);
+            }
+            printf("%-{$indent}s{$color}%s: %s".COLOR_RESET, ' ', $k, $el);
+            printf("\r\n");
+        }
+    }
+    $indent--; // decrement indent on new element
+}
+
+function filter_iterable_unique($iterable, $keep_key_assoc = false) : array {
+    $duplicate_keys = [];
+    $tmp = [];
+    foreach ($iterable as $key=>$val) {
+        // convert objects to arrays, in_array() does not support objects
+        if(is_object($val)){
+            $val = (array)$val;
+		}
+
+        if( ! in_array($val, $tmp)) {
+            $tmp[] = $val;
+		} else {
+            $duplicate_keys[] = $key;
+		}        
+    }
+
+    foreach ($duplicate_keys as $key) {
+        unset($iterable[$key]);
+	}
+
+    return $keep_key_assoc ? $iterable : array_values($iterable);
 }
 
 function set_user_agent() : string {
@@ -841,7 +953,7 @@ function get_public_ip(int $prox_opt) : string {
         ],
     ]);
     if($prox_opt === 1) {
-        curl_setopt($ch, CURLOPT_PROXY, '127.0.0.1:9050');
+        curl_setopt($ch, CURLOPT_PROXY, TOR_SOCKS5_ADDR);
         curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
     }
     $result = curl_exec($ch);
@@ -849,7 +961,7 @@ function get_public_ip(int $prox_opt) : string {
     return $result;
 }
 
-function read_json(string $file) : array {
+function read_json(string $file) : array|object {
     if( ! file_exists($file)){
         return [];
     }
@@ -862,92 +974,56 @@ function read_json(string $file) : array {
     return ! empty($json_decoded) ? $json_decoded : [];
 }
 
-function fetch_html_elements_by_type($elements, string $filter_element) : array {
-    $data = [];
-    if(empty($elements)){
-        return $data;
-    }
-    recursive_filter_elements($elements, $data, $filter_element);
-    return ! empty($data) ? $data : [];
+function exec_remote_filesize_request(string $url) : float {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => 1,
+        CURLOPT_FOLLOWLOCATION => 1, // dont want the size of redir request
+        CURLOPT_HEADER => 1,
+        CURLOPT_NOBODY => 1,
+    ]);
+    $data = curl_exec($ch);
+    $size = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+    curl_close($ch);
+    return round($size, 2);
 }
 
-function recursive_loop_child_elements($element, &$el_elements) : void {
-    if(is_iterable($element)){
-        // TODO:: fix counter
-        $cnt = 0;
-        foreach ($element as $key => $el) {
-            if( ! empty($el->attributes)){
-                foreach ($el->attributes as $attr){
-                    if( ! empty($attr->nodeValue)){
-                        $val = trim(str_replace("\n", " ", $attr->nodeValue));
-                        if(in_array($el->nodeName, TAGS)){
-                            $el_elements[$el->nodeName][$attr->nodeName] = $val;
-                        } else {
-                            $el_elements["{$el->nodeName}-{$cnt}"][$attr->nodeName] = $val;
-                        }
-                    }
-                }
-                $cnt++;
-            }
-            if($el->hasChildNodes()){
-                recursive_loop_child_elements($el->childNodes, $el_elements);
-            }
-        }
-    } else {
-        if( ! empty($element->attributes)){
-            $cnt = 0;
-            foreach ($element->attributes as $attr){
-                if( ! empty($attr->nodeValue)){
-                    $val = trim(str_replace("\n", " ", $attr->nodeValue));
-                    if(in_array($element->nodeName, TAGS)){
-                        $el_elements[$element->nodeName][$attr->nodeName] = $val;
-                    } else {
-                        $el_elements["{$element->nodeName}-{$cnt}"][$attr->nodeName] = $val;
-                        $cnt++;
-                    }
-                }
-            }
-        }
-        if($element->hasChildNodes()){
-            recursive_loop_child_elements($element->childNodes, $el_elements);
-        }
-    }
+function format_file_size_to_str(int $size) : string {
+    $size_str = (string)$size;
+    return strlen($size_str) > 6
+            ? sprintf("%.2fMb", ($size / 1000000))
+            : ((strlen($size_str) > 3 && strlen($size_str) < 7)
+                ? sprintf("%.2fkb", ($size / 1000))
+                : sprintf("%.2fb", $size)
+              );
 }
 
-// TODO:: fix recursion on whole result list
-function recursive_filter_elements($elements, &$data, string $filter_element) : void {
-    foreach ($elements as $k => $el_vals) {
-        if(is_iterable($el_vals) && ! empty($el_vals)){
-            recursive_filter_elements($el_vals, $data, $filter_element);
-        }
-        else {
-            $node_el = $el_vals->node_elements ?? null;
-            $node = $el_vals->node ?? null;
-            if($node_el !== null && $node !== null && $node === $filter_element){
-                foreach ($node_el as $node_el_key => $node_el_val) {
-                    $data[$node_el_key] = $node_el_val;
-                }
-            }
-        }
-    }
+function get_exec_time(float $time) : string {
+    $color = $time < 5 ? COLOR_GREEN :($time > 5 && $time < 10 ? COLOR_YELLOW : COLOR_RED);
+    return sprintf("{$color}%.2fs".COLOR_RESET, $time);
 }
 
-function recursive_read_elements($elements) : void {
-    foreach ($elements as $key => $el) {
-        if(is_object($el) || is_array($el)) {
-            recursive_read_elements($el);
-        } else {
-            if($key === 'node' || $key === 'node_url'){
-                $color = COLOR_LIGHT_BLUE;
-                $k = str_replace('_', ' ', strtoupper($key));
-            } else {
-                $color = COLOR_WHITE;
-                $k = str_replace('_', ' ', $key);
-            }
-            printf("{$color}%s: %s".COLOR_RESET, $k, $el);
-            printf("\r\n");
+function create_entity_dir(string $target_dir) : bool {
+    if( ! file_exists($target_dir)){
+        if( ! mkdir($target_dir, 0755, true)){
+            printf("> Error creating target dir: [%s]\r\n", $target_dir);
+            return false;
         }
+        printf("> Target dir created: [%s]\r\n", $target_dir);
+        return true;
     }
+    printf("> Target dir already exists: [%s]\r\n", $target_dir);
+    return true;
+}
+
+function get_response_elements(int $code) : array {
+    return (($code >= 200 && $code < 300)
+           ? ['color' => COLOR_GREEN, 'response' => "Success", 'indent' => '',]
+           :(($code >= 300 && $code < 400)
+                ? ['color' => COLOR_LIGHT_BLUE, 'response' => "Redir", 'indent' => ' ',]
+                : ['color' => COLOR_RED, 'response' => "Error", 'indent' => ' ',]
+            )
+    );
 }
 
 ?>
